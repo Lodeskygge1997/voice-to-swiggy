@@ -55,18 +55,28 @@ def process_audio(audio_file_path):
             error_details = e.response.text if e.response else str(e)
             status_code = e.response.status_code if e.response else None
             
+            # Try to extract the specific internal error code (e.g., 'insufficient_quota_error')
+            internal_code = "unknown_code"
+            try:
+                if e.response:
+                    err_json = e.response.json()
+                    if "error" in err_json and "code" in err_json["error"]:
+                        internal_code = err_json["error"]["code"]
+            except Exception:
+                pass
+            
             if status_code == 429:
                 if attempt < max_retries - 1:
                     wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s
-                    add_log("warning", f"Sarvam Rate Limit (429) hit. Body: {error_details}. Waiting {wait_time}s to retry...")
+                    add_log("warning", f"Sarvam Rate Limit (429) hit. Internal Code: [{internal_code}]. Waiting {wait_time}s...")
                     time.sleep(wait_time)
                     continue
                 else:
-                    add_log("error", f"Sarvam 429 Rate Limit Exhausted after {max_retries} attempts: {error_details}")
-                    return f"Sarvam AI Exact Error: {error_details}"
+                    add_log("error", f"Sarvam 429 Exhausted. Code: [{internal_code}]. Details: {error_details}")
+                    return f"Sarvam AI Exact Error [{internal_code}]: {error_details}"
             else:
-                add_log("error", f"Sarvam AI HTTP Error {status_code}: {error_details}")
-                return f"Sarvam AI API Error: {error_details}"
+                add_log("error", f"Sarvam AI HTTP Error {status_code} [{internal_code}]: {error_details}")
+                return f"Sarvam AI API Error [{internal_code}]: {error_details}"
                 
         except Exception as e:
             add_log("error", f"Error communicating with Sarvam AI: {str(e)}")
