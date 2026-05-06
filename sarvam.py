@@ -16,7 +16,7 @@ def process_audio(audio_file_path):
     
     # Send the audio file to Sarvam AI
     with open(audio_file_path, "rb") as audio_file:
-        files = {"file": audio_file}
+        files = {"file": ("audio.webm", audio_file, "audio/webm")}
         data = {
             "model": "saaras:v3",
             "mode": "translate" # Translate to english to easily match Swiggy menu
@@ -26,13 +26,12 @@ def process_audio(audio_file_path):
             response = requests.post(url, headers=headers, files=files, data=data)
             response.raise_for_status()
             
-            # The API returns JSON with a 'transcript' or 'text' key.
-            # Typically it returns a 'transcript' string. 
             response_json = response.json()
-            
-            # Trying standard keys, fallback if empty
             transcript = response_json.get('transcript') or response_json.get('text', '')
             return transcript if transcript else "Could not understand the audio clearly."
             
+        except requests.exceptions.HTTPError as e:
+            error_details = e.response.text if e.response else str(e)
+            return f"Sarvam AI API Error: {error_details}"
         except Exception as e:
             return f"Error communicating with Sarvam AI: {str(e)}"
