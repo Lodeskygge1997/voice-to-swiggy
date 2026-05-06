@@ -40,6 +40,8 @@ def process_audio(audio_file_path):
                 response.raise_for_status()
                 
                 response_json = response.json()
+                add_log("info", f"Sarvam Full Response Body: {response.text}")
+                
                 transcript = response_json.get('transcript') or response_json.get('text', '')
                 
                 if transcript:
