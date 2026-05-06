@@ -14,7 +14,10 @@ def process_audio(audio_file_path):
         return "Error: SARVAM_API_KEY is not set."
         
     url = "https://api.sarvam.ai/speech-to-text"
-    headers = {"api-subscription-key": SARVAM_API_KEY}
+    headers = {
+        "api-subscription-key": SARVAM_API_KEY,
+        "User-Agent": "VoiceToSwiggy/1.0"
+    }
     
     # Send the audio file to Sarvam AI
     add_log("info", f"Sending audio file {audio_file_path} to Sarvam AI...")

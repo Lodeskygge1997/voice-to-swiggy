@@ -4,12 +4,11 @@ from twilio.twiml.messaging_response import MessagingResponse
 from dotenv import load_dotenv
 load_dotenv()
 
-from mock_swiggy import MockSwiggyMCP
 from sarvam import process_audio
+from swiggy_agent import run_agent_sync
 from logger_store import add_log, server_logs
 
 app = Flask(__name__, static_folder='static')
-swiggy_mcp = MockSwiggyMCP()
 
 @app.route('/admin/logs')
 def admin_logs():
@@ -49,13 +48,13 @@ def order_from_web():
     # 1. Process with Sarvam
     text = process_audio(temp_path)
     
-    # 2. Process with Swiggy MCP
-    response_msg = swiggy_mcp.process_order(text)
+    # 2. Process with Swiggy MCP Agent
+    response_msg = run_agent_sync(text)
     
     return jsonify({
         "transcription": text,
         "message": response_msg,
-        "cart": swiggy_mcp.cart
+        "cart": [] # Cart is now managed by the agent internally
     })
 
 @app.route('/api/order/whatsapp', methods=['POST'])
@@ -83,8 +82,8 @@ def order_from_whatsapp():
         # 1. Process with Sarvam
         text = process_audio(temp_path)
         
-        # 2. Process with Swiggy MCP
-        reply_text = swiggy_mcp.process_order(text)
+        # 2. Process with Swiggy MCP Agent
+        reply_text = run_agent_sync(text)
         
         # 3. Add transcription so the user knows what we heard
         final_reply = f"🎙️ *I heard:* '{text}'\n\n🛍️ *Swiggy:* {reply_text}"
