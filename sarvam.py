@@ -5,9 +5,11 @@ from logger_store import add_log
 
 SARVAM_API_KEY = os.environ.get("SARVAM_API_KEY")
 
+import time
+
 def process_audio(audio_file_path):
     """
-    Sends the audio file to Sarvam AI speech-to-text API.
+    Sends the audio file to Sarvam AI speech-to-text API with retries for 429 limits.
     """
     if not SARVAM_API_KEY:
         add_log("error", "SARVAM_API_KEY is not set.")
@@ -19,33 +21,51 @@ def process_audio(audio_file_path):
         "User-Agent": "VoiceToSwiggy/1.0"
     }
     
-    # Send the audio file to Sarvam AI
-    add_log("info", f"Sending audio file {audio_file_path} to Sarvam AI...")
-    with open(audio_file_path, "rb") as audio_file:
-        files = {"file": ("audio.webm", audio_file, "audio/webm")}
-        data = {
-            "model": "saaras:v3",
-            "mode": "translate" # Translate to english to easily match Swiggy menu
-        }
-        
+    # Dynamically extract correct file extension to prevent gateway corruption
+    filename = os.path.basename(audio_file_path)
+    extension = os.path.splitext(filename)[1].lower().replace(".", "")
+    mime_type = f"audio/{extension}" if extension else "audio/wav"
+    
+    data = {
+        "model": "saaras:v3"
+    }
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        add_log("info", f"Sending audio {audio_file_path} to Sarvam AI (Attempt {attempt+1}/{max_retries})...")
         try:
-            response = requests.post(url, headers=headers, files=files, data=data)
-            response.raise_for_status()
-            
-            response_json = response.json()
-            transcript = response_json.get('transcript') or response_json.get('text', '')
-            
-            if transcript:
-                add_log("success", f"Sarvam transcribed: '{transcript}'")
-                return transcript
-            else:
-                add_log("warning", "Sarvam returned empty transcript.")
-                return "Could not understand the audio clearly."
-            
+            with open(audio_file_path, "rb") as audio_file:
+                files = {"file": (filename, audio_file, mime_type)}
+                response = requests.post(url, headers=headers, files=files, data=data)
+                response.raise_for_status()
+                
+                response_json = response.json()
+                transcript = response_json.get('transcript') or response_json.get('text', '')
+                
+                if transcript:
+                    add_log("success", f"Sarvam transcribed: '{transcript}'")
+                    return transcript
+                else:
+                    add_log("warning", "Sarvam returned empty transcript.")
+                    return "Could not understand the audio clearly."
+                
         except requests.exceptions.HTTPError as e:
             error_details = e.response.text if e.response else str(e)
-            add_log("error", f"Sarvam AI HTTP Error: {error_details}")
-            return f"Sarvam AI API Error: {error_details}"
+            status_code = e.response.status_code if e.response else None
+            
+            if status_code == 429:
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s
+                    add_log("warning", f"Sarvam Rate Limit (429) hit. Waiting {wait_time}s to retry...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    add_log("error", f"Sarvam 429 Rate Limit Exhausted after {max_retries} attempts: {error_details}")
+                    return "Sarvam API Rate Limit Exceeded. Please try again in a minute."
+            else:
+                add_log("error", f"Sarvam AI HTTP Error {status_code}: {error_details}")
+                return f"Sarvam AI API Error: {error_details}"
+                
         except Exception as e:
             add_log("error", f"Error communicating with Sarvam AI: {str(e)}")
             return f"Error communicating with Sarvam AI: {str(e)}"
