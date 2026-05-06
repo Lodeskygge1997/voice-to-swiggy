@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice to Swiggy | Order with your voice</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
+
+        :root {
+            --primary: #fc8019; /* Swiggy orange */
+            --primary-dark: #e06c0b;
+            --bg: #121212;
+            --surface: #1e1e1e;
+            --text: #ffffff;
+            --text-muted: #a0a0a0;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+            margin-top: 2rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(90deg, #fc8019, #ffb347);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        p.subtitle {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+        }
+
+        main {
+            background: var(--surface);
+            padding: 3rem;
+            border-radius: 24px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+        }
+
+        .mic-button {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary), #ff6b6b);
+            border: none;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 0 auto 2rem;
+            transition: all 0.3s ease;
+            box-shadow: 0 10px 20px rgba(252, 128, 25, 0.3);
+            position: relative;
+        }
+
+        .mic-button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 15px 25px rgba(252, 128, 25, 0.4);
+        }
+
+        .mic-button.recording {
+            animation: pulse 1.5s infinite;
+            background: #ff4757;
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.7); }
+            70% { box-shadow: 0 0 0 20px rgba(255, 71, 87, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 71, 87, 0); }
+        }
+
+        .mic-icon {
+            width: 40px;
+            height: 40px;
+            fill: white;
+        }
+
+        .status {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            height: 30px;
+        }
+
+        .result-box {
+            margin-top: 2rem;
+            text-align: left;
+            background: rgba(0,0,0,0.3);
+            padding: 1.5rem;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.1);
+            display: none;
+        }
+
+        .result-box.visible {
+            display: block;
+            animation: fadeIn 0.5s ease forwards;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .label {
+            font-size: 0.9rem;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 0.5rem;
+            font-weight: 700;
+        }
+
+        .transcription {
+            font-size: 1.1rem;
+            margin-bottom: 1.5rem;
+            font-style: italic;
+        }
+
+        .response {
+            font-size: 1.1rem;
+            line-height: 1.5;
+        }
+
+        .loader {
+            display: none;
+            width: 48px;
+            height: 48px;
+            border: 5px solid #FFF;
+            border-bottom-color: var(--primary);
+            border-radius: 50%;
+            display: inline-block;
+            box-sizing: border-box;
+            animation: rotation 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes rotation {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        #loadingState {
+            display: none;
+        }
+
+        .menu-hint {
+            margin-top: 2rem;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Voice to Swiggy</h1>
+        <p class="subtitle">Speak your cravings out loud.</p>
+    </header>
+
+    <main>
+        <div id="recordingState">
+            <button class="mic-button" id="micBtn" aria-label="Record Order">
+                <svg class="mic-icon" viewBox="0 0 24 24">
+                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.39-.9.88 0 2.76-2.24 5.01-5.01 5.01s-5.01-2.25-5.01-5.01c0-.49-.41-.88-.9-.88s-.88.39-.88.88c0 3.44 2.54 6.3 5.86 6.78V21h-3.11c-.49 0-.88.39-.88.88s.39.88.88.88h7.22c.49 0 .88-.39.88-.88s-.39-.88-.88-.88h-3.11v-2.14c3.32-.48 5.86-3.34 5.86-6.78 0-.49-.4-.88-.88-.88z"/>
+                </svg>
+            </button>
+            <div class="status" id="statusText">Hold to Speak</div>
+        </div>
+
+        <div id="loadingState">
+            <span class="loader"></span>
+            <div class="status">Processing your order...</div>
+        </div>
+
+        <div class="result-box" id="resultBox">
+            <div class="label">I Heard:</div>
+            <div class="transcription" id="transcriptionText">"I want paneer tikka"</div>
+            <div class="label">Swiggy Says:</div>
+            <div class="response" id="responseText">Success!</div>
+        </div>
+        
+        <div class="menu-hint">
+            Available mock menu: Paneer Tikka, Garlic Naan, Butter Chicken, Dal Makhani, Jeera Rice, Biryani, Coke, Thumbs Up.
+        </div>
+    </main>
+
+    <script>
+        const micBtn = document.getElementById('micBtn');
+        const statusText = document.getElementById('statusText');
+        const recordingState = document.getElementById('recordingState');
+        const loadingState = document.getElementById('loadingState');
+        const resultBox = document.getElementById('resultBox');
+        const transcriptionText = document.getElementById('transcriptionText');
+        const responseText = document.getElementById('responseText');
+
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false;
+
+        async function initAudio() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+
+                mediaRecorder.ondataavailable = event => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = sendAudioToServer;
+            } catch (err) {
+                console.error("Microphone access denied", err);
+                statusText.innerText = "Microphone access denied";
+            }
+        }
+
+        initAudio();
+
+        micBtn.addEventListener('mousedown', startRecording);
+        micBtn.addEventListener('touchstart', startRecording);
+        
+        micBtn.addEventListener('mouseup', stopRecording);
+        micBtn.addEventListener('mouseleave', () => { if(isRecording) stopRecording() });
+        micBtn.addEventListener('touchend', stopRecording);
+
+        function startRecording(e) {
+            e.preventDefault();
+            if (!mediaRecorder) return;
+            audioChunks = [];
+            mediaRecorder.start();
+            isRecording = true;
+            micBtn.classList.add('recording');
+            statusText.innerText = "Listening... release to send";
+            resultBox.classList.remove('visible');
+        }
+
+        function stopRecording(e) {
+            if(e) e.preventDefault();
+            if (!isRecording) return;
+            mediaRecorder.stop();
+            isRecording = false;
+            micBtn.classList.remove('recording');
+        }
+
+        async function sendAudioToServer() {
+            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+            
+            // Show loading state
+            recordingState.style.display = 'none';
+            loadingState.style.display = 'block';
+            statusText.innerText = "Hold to Speak";
+
+            const formData = new FormData();
+            formData.append('audio', audioBlob, 'recording.webm');
+
+            try {
+                const response = await fetch('/api/order/web', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                transcriptionText.innerText = `"${data.transcription}"`;
+                responseText.innerText = data.message;
+                
+                // Show results
+                loadingState.style.display = 'none';
+                recordingState.style.display = 'block';
+                resultBox.classList.add('visible');
+                
+            } catch (error) {
+                console.error(error);
+                loadingState.style.display = 'none';
+                recordingState.style.display = 'block';
+                statusText.innerText = "Error processing request";
+            }
+        }
+    </script>
+</body>
+</html>
