@@ -2,11 +2,10 @@ import os
 from flask import Flask, request, jsonify, render_template, send_from_directory
 from twilio.twiml.messaging_response import MessagingResponse
 from dotenv import load_dotenv
+load_dotenv()
 
 from mock_swiggy import MockSwiggyMCP
 from sarvam import process_audio
-
-load_dotenv()
 
 app = Flask(__name__, static_folder='static')
 swiggy_mcp = MockSwiggyMCP()
