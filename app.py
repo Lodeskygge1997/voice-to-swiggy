@@ -6,9 +6,27 @@ load_dotenv()
 
 from mock_swiggy import MockSwiggyMCP
 from sarvam import process_audio
+from logger_store import add_log, server_logs
 
 app = Flask(__name__, static_folder='static')
 swiggy_mcp = MockSwiggyMCP()
+
+@app.route('/admin/logs')
+def admin_logs():
+    """Secured endpoint to view logs"""
+    admin_secret = os.environ.get("ADMIN_SECRET", "supersecret123")
+    passed_key = request.args.get("key")
+    
+    if passed_key != admin_secret:
+        add_log("warning", f"Unauthorized access attempt to logs with key: {passed_key}")
+        return "Unauthorized. Please provide the correct ?key= parameter.", 401
+        
+    html = "<body style='background:#121212; color:#0f0; font-family:monospace; padding:20px;'>"
+    html += "<h1>Admin Dashboard - Production Logs</h1><hr/>"
+    for log in server_logs:
+        html += f"<div>{log}</div>"
+    html += "</body>"
+    return html
 
 @app.route('/')
 def index():
@@ -17,12 +35,16 @@ def index():
 @app.route('/api/order/web', methods=['POST'])
 def order_from_web():
     """Endpoint for the Web Interface to send audio recordings."""
+    add_log("info", "Received audio upload from Web Interface")
+    
     if 'audio' not in request.files:
+        add_log("error", "No audio file provided in web request")
         return jsonify({"error": "No audio file provided"}), 400
         
     audio_file = request.files['audio']
     temp_path = "/tmp/web_audio.wav"
     audio_file.save(temp_path)
+    add_log("info", f"Saved audio file to {temp_path}")
     
     # 1. Process with Sarvam
     text = process_audio(temp_path)
@@ -41,6 +63,9 @@ def order_from_whatsapp():
     """Webhook endpoint for Twilio WhatsApp Sandbox."""
     incoming_msg = request.values.get('Body', '')
     media_url = request.values.get('MediaUrl0')
+    sender = request.values.get('From', 'Unknown')
+    
+    add_log("info", f"Received WhatsApp message from {sender}. MediaURL: {media_url}")
     
     response = MessagingResponse()
     msg = response.message()
@@ -49,6 +74,7 @@ def order_from_whatsapp():
     if media_url:
         import requests
         # Download the audio file from Twilio
+        add_log("info", f"Downloading audio from Twilio: {media_url}")
         audio_data = requests.get(media_url).content
         temp_path = "/tmp/whatsapp_audio.ogg"
         with open(temp_path, "wb") as f:
