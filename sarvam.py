@@ -58,7 +58,7 @@ def process_audio(audio_file_path):
             if status_code == 429:
                 if attempt < max_retries - 1:
                     wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s
-                    add_log("warning", f"Sarvam Rate Limit (429) hit. Waiting {wait_time}s to retry...")
+                    add_log("warning", f"Sarvam Rate Limit (429) hit. Body: {error_details}. Waiting {wait_time}s to retry...")
                     time.sleep(wait_time)
                     continue
                 else:
