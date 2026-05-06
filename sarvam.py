@@ -61,7 +61,7 @@ def process_audio(audio_file_path):
                     continue
                 else:
                     add_log("error", f"Sarvam 429 Rate Limit Exhausted after {max_retries} attempts: {error_details}")
-                    return "Sarvam API Rate Limit Exceeded. Please try again in a minute."
+                    return f"Sarvam AI Exact Error: {error_details}"
             else:
                 add_log("error", f"Sarvam AI HTTP Error {status_code}: {error_details}")
                 return f"Sarvam AI API Error: {error_details}"
