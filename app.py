@@ -111,42 +111,80 @@ def order_from_web():
         "cart": [] # Cart is now managed by the agent internally
     })
 
-@app.route('/api/order/whatsapp', methods=['POST'])
-def order_from_whatsapp():
-    """Webhook endpoint for Twilio WhatsApp Sandbox."""
-    incoming_msg = request.values.get('Body', '')
-    media_url = request.values.get('MediaUrl0')
-    sender = request.values.get('From', 'Unknown')
+@app.route('/api/telegram/webhook', methods=['POST'])
+def telegram_webhook():
+    """Webhook endpoint for Telegram Bot."""
+    data = request.json
+    if not data or "message" not in data:
+        return "OK", 200
+        
+    message = data["message"]
+    chat_id = message.get("chat", {}).get("id")
+    sender_name = message.get("from", {}).get("first_name", "Unknown")
     
-    add_log("info", f"Received WhatsApp message from {sender}. MediaURL: {media_url}")
-    record_user_behavior(sender, "whatsapp_message_received", {"media_url": media_url, "body": incoming_msg})
+    TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not TELEGRAM_BOT_TOKEN:
+        add_log("error", "TELEGRAM_BOT_TOKEN not set!")
+        return "Error", 500
+        
+    import requests
+    base_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
     
-    response = MessagingResponse()
-    msg = response.message()
-    
-    # Check if a voice note was sent
-    if media_url:
-        import requests
-        # Download the audio file from Twilio
-        add_log("info", f"Downloading audio from Twilio: {media_url}")
-        audio_data = requests.get(media_url).content
-        temp_path = "/tmp/whatsapp_audio.ogg"
+    def send_telegram_msg(text, parse_mode="Markdown"):
+        requests.post(f"{base_url}/sendMessage", json={
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": parse_mode
+        })
+
+    # If it's a voice note
+    if "voice" in message:
+        file_id = message["voice"]["file_id"]
+        add_log("info", f"Received Telegram Voice Note from {sender_name}. File ID: {file_id}")
+        record_user_behavior(chat_id, "telegram_voice_received", {"file_id": file_id})
+        
+        # 1. Get file path from Telegram
+        file_info = requests.get(f"{base_url}/getFile?file_id={file_id}").json()
+        if not file_info.get("ok"):
+            send_telegram_msg("Sorry, I couldn't download your voice note.")
+            return "OK", 200
+            
+        file_path = file_info["result"]["file_path"]
+        download_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
+        
+        # 2. Download audio
+        audio_data = requests.get(download_url).content
+        temp_path = "/tmp/telegram_audio.ogg"
         with open(temp_path, "wb") as f:
             f.write(audio_data)
             
-        # 1. Process with Sarvam
+        send_telegram_msg("🎧 *Listening to your order...*", parse_mode="Markdown")
+            
+        # 3. Process with Sarvam STT
         text = process_audio(temp_path)
+        send_telegram_msg(f"🎙️ *I heard:* '{text}'\n\n🤖 *Thinking...*")
         
-        # 2. Process with Swiggy MCP Agent
+        # 4. Process with Swiggy Agent
         reply_text = run_agent_sync(text)
         
-        # 3. Add transcription so the user knows what we heard
-        final_reply = f"🎙️ *I heard:* '{text}'\n\n🛍️ *Swiggy:* {reply_text}"
-        msg.body(final_reply)
-    else:
-        msg.body("Please send a voice note with your Swiggy order! For example: 'I want paneer tikka and garlic naan'.")
+        # 5. Send final reply
+        send_telegram_msg(f"🛍️ *Swiggy:* {reply_text}")
         
-    return str(response)
+    # If it's a text message
+    elif "text" in message:
+        text = message["text"]
+        add_log("info", f"Received Telegram Text from {sender_name}: {text}")
+        record_user_behavior(chat_id, "telegram_text_received", {"text": text})
+        
+        if text == "/start":
+            send_telegram_msg(f"Hello {sender_name}! 🍔 Welcome to Voice-to-Swiggy.\n\nSend me a *Voice Note* telling me what you want to order!")
+            return "OK", 200
+            
+        send_telegram_msg("🤖 *Thinking...*")
+        reply_text = run_agent_sync(text)
+        send_telegram_msg(f"🛍️ *Swiggy:* {reply_text}")
+
+    return "OK", 200
 
 if __name__ == '__main__':
     app.run(port=3000, debug=True)
