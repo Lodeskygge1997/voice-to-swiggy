@@ -140,7 +140,7 @@ def telegram_webhook():
         
     def process_and_reply(chat_id, sender_name, user_input):
         send_telegram_msg(chat_id, "🤖 *Thinking...*")
-        reply_text = run_agent_sync(user_input)
+        reply_text = run_agent_sync(user_input, session_id=str(chat_id))
         
         try:
             # Parse the LLM's JSON response for the menu flow
@@ -156,20 +156,17 @@ def telegram_webhook():
         except Exception:
             out_text = reply_text
             options = []
-            
-        # Generate the unique Web App URL for this user
-        host = request.host_url.rstrip('/')
-        web_app_url = f"{host}/?uid={chat_id}"
         
         inline_keyboard = []
         for opt in options:
             if "label" in opt and "action" in opt:
                 inline_keyboard.append([{"text": opt["label"], "callback_data": opt["action"][:64]}])
-                
-        # Always add the WebRTC voice call button at the bottom
-        inline_keyboard.append([{"text": "📞 Live Voice Call", "web_app": {"url": web_app_url}}])
         
-        send_telegram_msg(chat_id, f"🛍️ *Swiggy:* {out_text}", reply_markup={"inline_keyboard": inline_keyboard})
+        # We bypass the web app "Live Voice Call" button for purely interactive chat
+        # User will only see Swiggy's options
+        
+        reply_markup = {"inline_keyboard": inline_keyboard} if inline_keyboard else None
+        send_telegram_msg(chat_id, f"🛍️ *Swiggy:* {out_text}", reply_markup=reply_markup)
 
     # 1. Handle Callback Queries (Button Clicks)
     if "callback_query" in data:

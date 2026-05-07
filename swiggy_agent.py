@@ -1,71 +1,69 @@
-# swiggy_agent.py
 import os
 import asyncio
+import json
 from logger_store import add_log
 
+# In-memory store for interactive chat history
+CONVERSATIONS = {}
+
 async def get_swiggy_access_token():
-    """
-    Mock OAuth flow for local prototyping.
-    In production, this would handle the OAuth 2.1 PKCE redirect flow 
-    with /.well-known/oauth-authorization-server as per Swiggy docs.
-    """
     token = os.environ.get("SWIGGY_STAGING_TOKEN", "mock-token-for-local-prototype")
     add_log("info", "Obtained Swiggy OAuth access token.")
     return token
 
-async def process_order_via_agent(transcription):
+async def process_order_via_agent(transcription, session_id="default"):
     """
-    Connects to the Swiggy MCP server and passes the transcription to the Agent.
+    Simulates Swiggy MCP agent interaction using OpenAI directly.
+    Maintains interactive chat functionality using session_id.
     """
-    add_log("info", f"Initializing Swiggy Agent for input: '{transcription}'")
+    add_log("info", f"Processing input for session {session_id}: '{transcription}'")
     
-    # Check for LLM API Key
-    if not os.environ.get("OPENAI_API_KEY"):
-        add_log("warning", "OPENAI_API_KEY is not set. Agent cannot think.")
-        return f"System requires OPENAI_API_KEY to process: '{transcription}'"
-    
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        add_log("warning", "OPENAI_API_KEY is not set.")
+        return '{"text": "System requires OPENAI_API_KEY to process requests.", "options": []}'
+        
     try:
-        from agents import Agent, Runner
-        from agents.mcp import MCPServerStreamableHttp
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=api_key)
         
-        token = await get_swiggy_access_token()
+        # Initialize conversation if new
+        if session_id not in CONVERSATIONS:
+            CONVERSATIONS[session_id] = [
+                {
+                    "role": "system", 
+                    "content": (
+                        "You are a helpful Swiggy Food Ordering Assistant. "
+                        "You must ALWAYS respond with a strictly formatted JSON object. "
+                        "Schema: {\"text\": \"Your natural language response here\", \"options\": [{\"label\": \"Button Text\", \"action\": \"User prompt representing the button action\"}]}. "
+                        "Provide 'options' as an array of logical next steps for the user based on Swiggy's mock menu: Paneer Tikka, Garlic Naan, Butter Chicken, Dal Makhani, Biryani. "
+                        "Do NOT wrap the output in markdown. Start and end with curly braces."
+                    )
+                }
+            ]
+            
+        CONVERSATIONS[session_id].append({"role": "user", "content": transcription})
         
-        # Connect to real Swiggy MCP Server over SSE
-        swiggy_food = MCPServerStreamableHttp(
-            params={
-                "url": "https://mcp.swiggy.com/food",
-                "headers": {"Authorization": f"Bearer {token}"},
-            },
+        response = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=CONVERSATIONS[session_id],
+            temperature=0.7,
+            response_format={"type": "json_object"}
         )
         
-        agent = Agent(
-            name="FoodOrderingAgent",
-            instructions="Help users order food on Swiggy. Always call get_addresses first, then search_restaurants. "
-                         "CRITICAL: You must ALWAYS respond with a strictly formatted JSON object. "
-                         "Schema: {\"text\": \"Your natural language response here\", \"options\": [{\"label\": \"Button Text\", \"action\": \"User prompt representing the button action\"}]}. "
-                         "Provide 'options' as an array of logical next steps for the user. Do NOT wrap in markdown.",
-            mcp_servers=[swiggy_food],
-        )
+        reply_content = response.choices[0].message.content
+        CONVERSATIONS[session_id].append({"role": "assistant", "content": reply_content})
         
-        add_log("info", "Connecting to https://mcp.swiggy.com/food...")
-        await swiggy_food.connect()
+        add_log("success", f"Agent execution completed for {session_id}.")
+        return reply_content
         
-        add_log("info", "Running LLM Agent...")
-        result = await Runner.run(agent, transcription)
-        
-        add_log("success", f"Agent execution completed.")
-        return result.final_output
-        
-    except ImportError:
-        add_log("warning", "The official 'agents' SDK is not installed on this environment. Using prototype fallback.")
-        return f"Swiggy Agent Prototype Received: '{transcription}'. (Install Swiggy Agents SDK to complete the true HTTP connection)"
     except Exception as e:
         add_log("error", f"Agent execution failed: {str(e)}")
-        # If it returns a 401, it means the mock token was rejected by Swiggy's staging server
-        if "401" in str(e):
-            return f"Swiggy Auth Error: Your staging token was rejected. Please complete the OAuth process."
-        return f"Agent Error: {str(e)}"
+        return json.dumps({
+            "text": f"Agent Error: {str(e)}",
+            "options": []
+        })
 
-def run_agent_sync(transcription):
+def run_agent_sync(transcription, session_id="default"):
     """Synchronous wrapper for Flask endpoints."""
-    return asyncio.run(process_order_via_agent(transcription))
+    return asyncio.run(process_order_via_agent(transcription, session_id))
