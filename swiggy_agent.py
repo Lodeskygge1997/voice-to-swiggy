@@ -23,7 +23,7 @@ async def process_order_via_agent(transcription: str, session_id: str) -> str:
     Uses the Swiggy Universal Assistant pattern.
     """
     api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key and not os.environ.get("GEMINI_API_KEY") and not os.environ.get("GROQ_API_KEY"):
+    if not api_key and not os.environ.get("GEMINI_API_KEY") and not os.environ.get("GROQ_API_KEY") and not os.environ.get("OPENROUTER_API_KEY") and not os.environ.get("HUGGINGFACE_API_KEY"):
         return json.dumps({"text": "API key is missing. Cannot process request.", "options": []})
         
     try:
@@ -63,13 +63,21 @@ async def process_order_via_agent(transcription: str, session_id: str) -> str:
         
         gemini_api_key = os.environ.get("GEMINI_API_KEY")
         groq_api_key = os.environ.get("GROQ_API_KEY")
+        openrouter_api_key = os.environ.get("OPENROUTER_API_KEY")
+        hf_api_key = os.environ.get("HUGGINGFACE_API_KEY")
         
-        if gemini_api_key:
-            client = AsyncOpenAI(api_key=gemini_api_key, base_url="https://generativelanguage.googleapis.com/v1beta/openai/")
-            model_name = "gemini-2.0-flash"
-        elif groq_api_key:
+        if groq_api_key:
             client = AsyncOpenAI(api_key=groq_api_key, base_url="https://api.groq.com/openai/v1")
             model_name = "llama-3.3-70b-versatile"
+        elif openrouter_api_key:
+            client = AsyncOpenAI(api_key=openrouter_api_key, base_url="https://openrouter.ai/api/v1")
+            model_name = "meta-llama/llama-3-8b-instruct:free"
+        elif hf_api_key:
+            client = AsyncOpenAI(api_key=hf_api_key, base_url="https://api-inference.huggingface.co/v1/")
+            model_name = "meta-llama/Meta-Llama-3-8B-Instruct"
+        elif gemini_api_key:
+            client = AsyncOpenAI(api_key=gemini_api_key, base_url="https://generativelanguage.googleapis.com/v1beta/openai/")
+            model_name = "gemini-2.0-flash"
         else:
             client = AsyncOpenAI(api_key=api_key)
             model_name = "gpt-4o"
