@@ -110,7 +110,7 @@ async def process_order_via_agent(transcription: str, session_id: str) -> str:
             error_msg = str(e)
             if "429" in error_msg:
                 return json.dumps({
-                    "text": "My servers are currently overwhelmed (Quota Exceeded). Please try again in a few moments, or switch to a different free provider like Groq.",
+                    "text": "My servers are currently experiencing high traffic. Please try your order again in a few moments.",
                     "options": []
                 })
             return json.dumps({"text": f"Agent Error: {error_msg}", "options": []})
