@@ -2,6 +2,7 @@
 import os
 import requests
 from logger_store import add_log
+from network_store import record_trace
 
 SARVAM_API_KEY = os.environ.get("SARVAM_API_KEY")
 
@@ -34,9 +35,25 @@ def process_audio(audio_file_path):
     for attempt in range(max_retries):
         add_log("info", f"Sending audio {audio_file_path} to Sarvam AI (Attempt {attempt+1}/{max_retries})...")
         try:
+            start_time = time.time()
             with open(audio_file_path, "rb") as audio_file:
                 files = {"file": (filename, audio_file, mime_type)}
                 response = requests.post(url, headers=headers, files=files, data=data)
+                duration_ms = int((time.time() - start_time) * 1000)
+                
+                # Record outbound trace to APIGW
+                record_trace(
+                    direction="OUTBOUND",
+                    method="POST",
+                    url=url,
+                    request_headers=headers,
+                    request_body={"model": data.get("model"), "file": filename},
+                    response_status=response.status_code,
+                    response_headers=dict(response.headers),
+                    response_body=response.text,
+                    duration_ms=duration_ms
+                )
+                
                 response.raise_for_status()
                 
                 response_json = response.json()

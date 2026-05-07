@@ -1,5 +1,6 @@
 import os
-from flask import Flask, request, jsonify, render_template, send_from_directory
+import time
+from flask import Flask, request, jsonify, render_template, send_from_directory, g
 from twilio.twiml.messaging_response import MessagingResponse
 from dotenv import load_dotenv
 load_dotenv()
@@ -7,8 +8,42 @@ load_dotenv()
 from sarvam import process_audio
 from swiggy_agent import run_agent_sync
 from logger_store import add_log, server_logs
+from network_store import record_trace, get_traces, record_user_behavior
 
 app = Flask(__name__, static_folder='static')
+
+@app.before_request
+def start_timer():
+    g.start_time = time.time()
+    try:
+        g.req_body = request.get_data(as_text=True)
+    except Exception:
+        g.req_body = "Binary Data"
+
+@app.after_request
+def log_request(response):
+    if request.path.startswith('/admin') or request.path.startswith('/api/traces') or request.path.startswith('/static') or request.path == '/':
+        return response
+        
+    duration = int((time.time() - g.start_time) * 1000)
+    
+    try:
+        resp_body = response.get_data(as_text=True) if response.direct_passthrough is False else "Streamed/Binary"
+    except Exception:
+        resp_body = "Binary Data"
+        
+    record_trace(
+        direction="INBOUND",
+        method=request.method,
+        url=request.url,
+        request_headers=dict(request.headers),
+        request_body=g.req_body,
+        response_status=response.status_code,
+        response_headers=dict(response.headers),
+        response_body=resp_body,
+        duration_ms=duration
+    )
+    return response
 
 @app.route('/admin/logs')
 def admin_logs():
@@ -27,6 +62,23 @@ def admin_logs():
     html += "</body>"
     return html
 
+@app.route('/admin/apigw')
+def admin_apigw():
+    """Returns the rich API Gateway HTML UI"""
+    admin_secret = os.environ.get("ADMIN_SECRET", "supersecret123")
+    passed_key = request.args.get("key")
+    if passed_key != admin_secret:
+        return "Unauthorized. Please provide the correct ?key= parameter.", 401
+    return render_template('apigw.html')
+
+@app.route('/api/traces')
+def api_traces():
+    admin_secret = os.environ.get("ADMIN_SECRET", "supersecret123")
+    passed_key = request.args.get("key")
+    if passed_key != admin_secret:
+        return jsonify({"error": "Unauthorized"}), 401
+    return jsonify(get_traces())
+
 @app.route('/')
 def index():
     return app.send_static_file('index.html')
@@ -44,6 +96,8 @@ def order_from_web():
     temp_path = "/tmp/web_audio.wav"
     audio_file.save(temp_path)
     add_log("info", f"Saved audio file to {temp_path}")
+    
+    record_user_behavior("web_user", "voice_order_received", {"path": temp_path})
     
     # 1. Process with Sarvam
     text = process_audio(temp_path)
@@ -65,6 +119,7 @@ def order_from_whatsapp():
     sender = request.values.get('From', 'Unknown')
     
     add_log("info", f"Received WhatsApp message from {sender}. MediaURL: {media_url}")
+    record_user_behavior(sender, "whatsapp_message_received", {"media_url": media_url, "body": incoming_msg})
     
     response = MessagingResponse()
     msg = response.message()

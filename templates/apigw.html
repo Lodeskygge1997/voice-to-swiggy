@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice-to-Swiggy APIGW Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-base: #0f1115;
+            --bg-surface: #1a1d24;
+            --bg-surface-hover: #232730;
+            --border-color: #2e333d;
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --accent: #3b82f6;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --font-sans: 'Inter', sans-serif;
+            --font-mono: 'Fira Code', monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background-color: var(--bg-base);
+            color: var(--text-primary);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Sidebar / Request List */
+        .sidebar {
+            width: 350px;
+            background-color: var(--bg-surface);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            z-index: 10;
+        }
+
+        .header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(26, 29, 36, 0.8);
+            backdrop-filter: blur(10px);
+        }
+
+        .header h1 {
+            font-size: 1.2rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .pulse {
+            width: 8px;
+            height: 8px;
+            background-color: var(--success);
+            border-radius: 50%;
+            box-shadow: 0 0 10px var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+
+        .trace-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .trace-item {
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .trace-item:hover, .trace-item.active {
+            background-color: var(--bg-surface-hover);
+        }
+        
+        .trace-item.active {
+            border-left: 3px solid var(--accent);
+        }
+
+        .trace-meta {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .trace-badge {
+            font-size: 0.65rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .badge-inbound { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
+        .badge-outbound { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+
+        .trace-title {
+            font-size: 0.85rem;
+            font-family: var(--font-mono);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .method { font-weight: 700; }
+        .method.GET { color: #34d399; }
+        .method.POST { color: #60a5fa; }
+        .method.PUT { color: #fbbf24; }
+        .method.DELETE { color: #f87171; }
+
+        .status-pill {
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-family: var(--font-mono);
+        }
+        .status-2xx { background: rgba(16, 185, 129, 0.1); color: var(--success); }
+        .status-3xx { background: rgba(245, 158, 11, 0.1); color: var(--warning); }
+        .status-4xx, .status-5xx { background: rgba(239, 68, 68, 0.1); color: var(--danger); }
+
+        /* Main View */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background-color: var(--bg-base);
+            position: relative;
+        }
+
+        .empty-state {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: var(--text-secondary);
+            text-align: center;
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            opacity: 0.5;
+            margin-bottom: 16px;
+        }
+
+        .detail-view {
+            display: none;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .detail-header {
+            padding: 20px 30px;
+            background-color: var(--bg-surface);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .detail-url {
+            font-family: var(--font-mono);
+            font-size: 1.1rem;
+            color: var(--text-primary);
+            word-break: break-all;
+        }
+
+        .detail-stats {
+            display: flex;
+            gap: 20px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .detail-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 30px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .section {
+            background-color: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .section-header {
+            padding: 12px 20px;
+            background-color: rgba(0,0,0,0.2);
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 600;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+        }
+
+        pre {
+            padding: 20px;
+            margin: 0;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: #e2e8f0;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-base); }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #444; }
+
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="header">
+            <h1><div class="pulse"></div> API Gateway</h1>
+            <div style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 5px;">Network Traffic Monitor</div>
+        </div>
+        <div class="trace-list" id="traceList">
+            <!-- Items injected by JS -->
+        </div>
+    </div>
+
+    <div class="main">
+        <div class="empty-state" id="emptyState">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            <p>Select a request to view details</p>
+        </div>
+
+        <div class="detail-view" id="detailView">
+            <div class="detail-header">
+                <div class="detail-url"><span id="dMethod" class="method"></span> <span id="dUrl"></span></div>
+                <div class="detail-stats">
+                    <span id="dStatus" class="status-pill"></span>
+                    <span>⏱ <span id="dTime"></span>ms</span>
+                    <span>📅 <span id="dTimestamp"></span></span>
+                    <span id="dDirection" class="trace-badge"></span>
+                </div>
+            </div>
+            <div class="detail-body">
+                <div class="section">
+                    <div class="section-header">Request Headers</div>
+                    <pre id="dReqHeaders"></pre>
+                </div>
+                <div class="section">
+                    <div class="section-header">Request Body</div>
+                    <pre id="dReqBody"></pre>
+                </div>
+                <div class="section">
+                    <div class="section-header">Response Headers</div>
+                    <pre id="dResHeaders"></pre>
+                </div>
+                <div class="section">
+                    <div class="section-header">Response Body</div>
+                    <pre id="dResBody"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allTraces = [];
+        const secretKey = new URLSearchParams(window.location.search).get('key') || '';
+
+        function fetchTraces() {
+            fetch(`/api/traces?key=${secretKey}`)
+                .then(res => res.json())
+                .then(data => {
+                    allTraces = data;
+                    renderList();
+                });
+        }
+
+        function formatJSON(str) {
+            try {
+                return JSON.stringify(JSON.parse(str), null, 2);
+            } catch (e) {
+                return str;
+            }
+        }
+
+        function getStatusClass(code) {
+            if (code >= 200 && code < 300) return 'status-2xx';
+            if (code >= 300 && code < 400) return 'status-3xx';
+            return 'status-4xx';
+        }
+
+        function renderList() {
+            const list = document.getElementById('traceList');
+            list.innerHTML = '';
+            
+            allTraces.forEach((t, i) => {
+                const el = document.createElement('div');
+                el.className = 'trace-item';
+                el.onclick = () => showDetail(i);
+                
+                const dirClass = t.direction === 'INBOUND' ? 'badge-inbound' : 'badge-outbound';
+                const statusClass = getStatusClass(t.response_status);
+
+                el.innerHTML = `
+                    <div class="trace-meta">
+                        <span>${t.timestamp}</span>
+                        <span class="trace-badge ${dirClass}">${t.direction}</span>
+                    </div>
+                    <div class="trace-title">
+                        <span class="status-pill ${statusClass}">${t.response_status || 'ERR'}</span>
+                        <span class="method ${t.method}">${t.method}</span>
+                        <span style="flex:1; overflow:hidden; text-overflow:ellipsis;">${t.url.split('?')[0].split('/').pop() || '/'}</span>
+                    </div>
+                `;
+                list.appendChild(el);
+            });
+        }
+
+        function showDetail(index) {
+            const t = allTraces[index];
+            document.querySelectorAll('.trace-item').forEach((el, i) => {
+                el.classList.toggle('active', i === index);
+            });
+
+            document.getElementById('emptyState').style.display = 'none';
+            document.getElementById('detailView').style.display = 'flex';
+
+            document.getElementById('dMethod').textContent = t.method;
+            document.getElementById('dMethod').className = `method ${t.method}`;
+            document.getElementById('dUrl').textContent = t.url;
+            
+            const statusEl = document.getElementById('dStatus');
+            statusEl.textContent = t.response_status || 'ERROR';
+            statusEl.className = `status-pill ${getStatusClass(t.response_status)}`;
+
+            document.getElementById('dTime').textContent = t.duration_ms;
+            document.getElementById('dTimestamp').textContent = t.timestamp;
+            
+            const dirEl = document.getElementById('dDirection');
+            dirEl.textContent = t.direction;
+            dirEl.className = `trace-badge ${t.direction === 'INBOUND' ? 'badge-inbound' : 'badge-outbound'}`;
+
+            document.getElementById('dReqHeaders').textContent = formatJSON(JSON.stringify(t.request_headers));
+            document.getElementById('dReqBody').textContent = formatJSON(t.request_body) || '(Empty Body)';
+            document.getElementById('dResHeaders').textContent = formatJSON(JSON.stringify(t.response_headers));
+            document.getElementById('dResBody').textContent = formatJSON(t.response_body) || '(Empty Body)';
+        }
+
+        // Poll every 3 seconds
+        fetchTraces();
+        setInterval(fetchTraces, 3000);
+    </script>
+</body>
+</html>
