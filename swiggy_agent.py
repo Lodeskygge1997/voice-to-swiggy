@@ -61,26 +61,41 @@ async def process_order_via_agent(transcription: str, session_id: str) -> str:
         # Fallback to free LLMs (Gemini or Groq) using the OpenAI SDK compatibility layer
         from openai import AsyncOpenAI
         
-        gemini_api_key = os.environ.get("GEMINI_API_KEY")
-        groq_api_key = os.environ.get("GROQ_API_KEY")
-        openrouter_api_key = os.environ.get("OPENROUTER_API_KEY")
-        hf_api_key = os.environ.get("HUGGINGFACE_API_KEY")
-        
-        if groq_api_key:
-            client = AsyncOpenAI(api_key=groq_api_key, base_url="https://api.groq.com/openai/v1")
-            model_name = "llama-3.3-70b-versatile"
-        elif openrouter_api_key:
-            client = AsyncOpenAI(api_key=openrouter_api_key, base_url="https://openrouter.ai/api/v1")
-            model_name = "meta-llama/llama-3-8b-instruct:free"
-        elif hf_api_key:
-            client = AsyncOpenAI(api_key=hf_api_key, base_url="https://api-inference.huggingface.co/v1/")
-            model_name = "meta-llama/Meta-Llama-3-8B-Instruct"
-        elif gemini_api_key:
-            client = AsyncOpenAI(api_key=gemini_api_key, base_url="https://generativelanguage.googleapis.com/v1beta/openai/")
-            model_name = "gemini-2.0-flash"
-        else:
-            client = AsyncOpenAI(api_key=api_key)
-            model_name = "gpt-4o"
+        # Priority list of free providers (Groq > OpenRouter > HuggingFace > Gemini > OpenAI)
+        providers = []
+        if os.environ.get("GROQ_API_KEY"):
+            providers.append({
+                "client": AsyncOpenAI(api_key=os.environ.get("GROQ_API_KEY"), base_url="https://api.groq.com/openai/v1"),
+                "model": "llama-3.3-70b-versatile",
+                "name": "Groq"
+            })
+        if os.environ.get("OPENROUTER_API_KEY"):
+            providers.append({
+                "client": AsyncOpenAI(api_key=os.environ.get("OPENROUTER_API_KEY"), base_url="https://openrouter.ai/api/v1"),
+                "model": "meta-llama/llama-3-8b-instruct:free",
+                "name": "OpenRouter"
+            })
+        if os.environ.get("HUGGINGFACE_API_KEY"):
+            providers.append({
+                "client": AsyncOpenAI(api_key=os.environ.get("HUGGINGFACE_API_KEY"), base_url="https://api-inference.huggingface.co/v1/"),
+                "model": "meta-llama/Meta-Llama-3-8B-Instruct",
+                "name": "HuggingFace"
+            })
+        if os.environ.get("GEMINI_API_KEY"):
+            providers.append({
+                "client": AsyncOpenAI(api_key=os.environ.get("GEMINI_API_KEY"), base_url="https://generativelanguage.googleapis.com/v1beta/openai/"),
+                "model": "gemini-2.0-flash",
+                "name": "Gemini"
+            })
+        if os.environ.get("OPENAI_API_KEY"):
+            providers.append({
+                "client": AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY")),
+                "model": "gpt-4o",
+                "name": "OpenAI"
+            })
+            
+        if not providers:
+            return json.dumps({"text": "No API keys configured. Cannot process request.", "options": []})
         
         if session_id not in CONVERSATIONS:
             CONVERSATIONS[session_id] = [
@@ -102,26 +117,33 @@ async def process_order_via_agent(transcription: str, session_id: str) -> str:
             
         CONVERSATIONS[session_id].append({"role": "user", "content": transcription})
         
-        try:
-            response = await client.chat.completions.create(
-                model=model_name,
-                messages=CONVERSATIONS[session_id],
-                temperature=0.7
-            )
-            
-            reply_content = response.choices[0].message.content
-            CONVERSATIONS[session_id].append({"role": "assistant", "content": reply_content})
-            add_log("success", f"Fallback agent execution completed for {session_id}.")
-            return reply_content
-        except Exception as e:
-            add_log("error", f"LLM Generation Error: {str(e)}")
-            error_msg = str(e)
-            if "429" in error_msg:
-                return json.dumps({
-                    "text": "My servers are currently experiencing high traffic. Please try your order again in a few moments.",
-                    "options": []
-                })
-            return json.dumps({"text": f"Agent Error: {error_msg}", "options": []})
+        last_error = None
+        for provider in providers:
+            try:
+                response = await provider["client"].chat.completions.create(
+                    model=provider["model"],
+                    messages=CONVERSATIONS[session_id],
+                    temperature=0.7
+                )
+                
+                reply_content = response.choices[0].message.content
+                CONVERSATIONS[session_id].append({"role": "assistant", "content": reply_content})
+                add_log("success", f"Fallback agent execution completed via {provider['name']} for {session_id}.")
+                return reply_content
+                
+            except Exception as e:
+                last_error = str(e)
+                add_log("warning", f"{provider['name']} LLM failed: {last_error}. Trying next provider...")
+                continue
+                
+        # If all providers fail
+        add_log("error", f"All LLM providers failed. Last error: {last_error}")
+        if last_error and "429" in last_error:
+            return json.dumps({
+                "text": "My servers are currently experiencing high traffic. Please try your order again in a few moments.",
+                "options": []
+            })
+        return json.dumps({"text": f"Agent Error: {last_error}", "options": []})
         
     except Exception as e:
         add_log("error", f"Agent execution failed: {str(e)}")
