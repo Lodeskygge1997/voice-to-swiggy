@@ -108,6 +108,7 @@ async def process_order_via_agent(transcription: str, session_id: str) -> str:
                         "- For Groceries (Instamart): Prompt for specific items, quantity, and delivery location if missing.\n"
                         "- For Table Booking (Dineout): Prompt for the location/city, preferred time, type of setting (indoor/outdoor), filtering criteria, and number of people if missing.\n"
                         "Since you are in fallback mode, simulate the API interaction once all parameters are gathered.\n"
+                        "CRITICAL: When the user's order, booking, or request is fully confirmed, completed, or finalized, you MUST include the exact hidden string '[SESSION_FINISHED]' somewhere in your text response to clear the cart.\n"
                         "CRITICAL: You must ALWAYS respond with a strictly formatted JSON object. "
                         "Schema: {\"text\": \"Your natural language response here\", \"options\": [{\"label\": \"Button Text\", \"action\": \"User prompt representing the button action\"}]}. "
                         "Provide logical next steps as 'options' (e.g. quick reply buttons for times, locations, items, or confirming the order). Do NOT wrap the output in markdown."
@@ -127,7 +128,16 @@ async def process_order_via_agent(transcription: str, session_id: str) -> str:
                 )
                 
                 reply_content = response.choices[0].message.content
-                CONVERSATIONS[session_id].append({"role": "assistant", "content": reply_content})
+                
+                # Check for session reset intent
+                if "[SESSION_FINISHED]" in reply_content:
+                    reply_content = reply_content.replace("[SESSION_FINISHED]", "")
+                    if session_id in CONVERSATIONS:
+                        del CONVERSATIONS[session_id]
+                    add_log("info", f"Order confirmed. Session {session_id} memory wiped.")
+                else:
+                    CONVERSATIONS[session_id].append({"role": "assistant", "content": reply_content})
+                    
                 add_log("success", f"Fallback agent execution completed via {provider['name']} for {session_id}.")
                 return reply_content
                 
