@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+from logger_store import add_log
 
 # Create in-memory storage for active conversations
 # In a true production app, this would use Redis or Supabase
@@ -22,18 +23,21 @@ async def process_order_via_agent(transcription: str, session_id: str) -> str:
     Uses the Swiggy Universal Assistant pattern.
     """
     api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        return json.dumps({"text": "OpenAI API key is missing. Cannot process request.", "options": []})
+    if not api_key and not os.environ.get("GEMINI_API_KEY") and not os.environ.get("GROQ_API_KEY"):
+        return json.dumps({"text": "API key is missing. Cannot process request.", "options": []})
         
     try:
         # Attempt to use the robust agents SDK
         from agents import Agent, Runner
+        from mcp.client.streamable_http import MCPServerStreamableHttp
         
-        # Mocking the MCP server integration as per previous architecture
-        swiggy_food = "mcp://swiggy-food"
-        swiggy_instamart = "mcp://swiggy-instamart"
-        swiggy_dineout = "mcp://swiggy-dineout"
-
+        token = os.environ.get("SWIGGY_TOKEN", "mock_token")
+        
+        # Configure the 3 Swiggy MCP Server endpoints
+        swiggy_food = MCPServerStreamableHttp(params={"url": "https://mcp.swiggy.com/food", "headers": {"Authorization": f"Bearer {token}"}})
+        swiggy_instamart = MCPServerStreamableHttp(params={"url": "https://mcp.swiggy.com/instamart", "headers": {"Authorization": f"Bearer {token}"}})
+        swiggy_dineout = MCPServerStreamableHttp(params={"url": "https://mcp.swiggy.com/dineout", "headers": {"Authorization": f"Bearer {token}"}})
+        
         agent = Agent(
             name="SwiggyUniversalAgent",
             instructions=(
@@ -54,9 +58,21 @@ async def process_order_via_agent(transcription: str, session_id: str) -> str:
         return result.final_output
         
     except ImportError:
-        # Fallback to direct OpenAI if the deepmind SDK isn't installed
+        # Fallback to free LLMs (Gemini or Groq) using the OpenAI SDK compatibility layer
         from openai import AsyncOpenAI
-        client = AsyncOpenAI(api_key=api_key)
+        
+        gemini_api_key = os.environ.get("GEMINI_API_KEY")
+        groq_api_key = os.environ.get("GROQ_API_KEY")
+        
+        if gemini_api_key:
+            client = AsyncOpenAI(api_key=gemini_api_key, base_url="https://generativelanguage.googleapis.com/v1beta/openai/")
+            model_name = "gemini-2.0-flash"
+        elif groq_api_key:
+            client = AsyncOpenAI(api_key=groq_api_key, base_url="https://api.groq.com/openai/v1")
+            model_name = "llama-3.3-70b-versatile"
+        else:
+            client = AsyncOpenAI(api_key=api_key)
+            model_name = "gpt-4o"
         
         if session_id not in CONVERSATIONS:
             CONVERSATIONS[session_id] = [
@@ -78,15 +94,18 @@ async def process_order_via_agent(transcription: str, session_id: str) -> str:
             
         CONVERSATIONS[session_id].append({"role": "user", "content": transcription})
         
-        try:
-            response = await client.chat.completions.create(
-                model="gpt-4o",
-                messages=CONVERSATIONS[session_id],
-                temperature=0.3
-            )
-            
-            output = response.choices[0].message.content
-            CONVERSATIONS[session_id].append({"role": "assistant", "content": output})
-            return output
-        except Exception as e:
-            return json.dumps({"text": f"Agent Error: {str(e)}", "options": []})
+        response = await client.chat.completions.create(
+            model=model_name,
+            messages=CONVERSATIONS[session_id],
+            temperature=0.7
+        )
+        
+        reply_content = response.choices[0].message.content
+        CONVERSATIONS[session_id].append({"role": "assistant", "content": reply_content})
+        
+        add_log("success", f"Fallback agent execution completed for {session_id}.")
+        return reply_content
+        
+    except Exception as e:
+        add_log("error", f"Agent execution failed: {str(e)}")
+        return json.dumps({"text": f"Agent Error: {str(e)}", "options": []})
