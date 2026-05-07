@@ -1,24 +1,42 @@
 import os
-import json
-from flask import Flask, request, jsonify, render_template
+import time
+import requests
+import asyncio
+from flask import Flask, request, jsonify, g, render_template
 from flask_cors import CORS
-from logger_store import add_log
-from network_store import record_user_behavior
+from dotenv import load_dotenv
+
+# Import storage, logger, and agent logic
+from network_store import record_trace, get_traces, record_user_behavior
+from logger_store import add_log, server_logs
 from swiggy_agent import run_agent_sync
 
-app = Flask(__name__)
-CORS(app)
+load_dotenv()
 
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+# We import the processing from sarvam if available, else fallback
+try:
+    from sarvam import process_audio
+except ImportError:
+    def process_audio(file_path):
+        return "(Audio transcription disabled due to missing credentials)"
 
 def telegram_api_request(method, endpoint, **kwargs):
-    import requests
+    """Helper to make Telegram API calls safely."""
+    TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not TELEGRAM_BOT_TOKEN:
+        add_log("error", "TELEGRAM_BOT_TOKEN is not set.")
+        return None
+        
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/{endpoint}"
     try:
-        resp = requests.request(method, url, **kwargs)
-        return resp
+        if method == "POST":
+            response = requests.post(url, **kwargs)
+        else:
+            response = requests.get(url, **kwargs)
+        response.raise_for_status()
+        return response
     except Exception as e:
-        add_log("error", f"Telegram API error: {str(e)}")
+        add_log("error", f"Telegram API error: {e}")
         return None
 
 def send_telegram_msg_global(chat_id, text, reply_markup=None):
@@ -27,39 +45,110 @@ def send_telegram_msg_global(chat_id, text, reply_markup=None):
         payload["reply_markup"] = reply_markup
     telegram_api_request("POST", "sendMessage", json=payload)
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+app = Flask(__name__, static_folder='static')
+
+@app.before_request
+def start_timer():
+    g.start_time = time.time()
+    try:
+        g.req_body = request.get_data(as_text=True)
+    except Exception:
+        g.req_body = "Binary Data"
+
+@app.after_request
+def log_request(response):
+    if request.path.startswith('/admin') or request.path.startswith('/api/traces') or request.path.startswith('/static') or request.path == '/':
+        return response
+        
+    duration = int((time.time() - g.start_time) * 1000)
+    
+    try:
+        resp_body = response.get_data(as_text=True) if response.direct_passthrough is False else "Streamed/Binary"
+    except Exception:
+        resp_body = "Binary Data"
+        
+    try:
+        record_trace(
+            direction="INBOUND",
+            method=request.method,
+            url=request.url,
+            request_headers=dict(request.headers),
+            request_body=g.req_body,
+            response_status=response.status_code,
+            response_headers=dict(response.headers),
+            response_body=resp_body,
+            duration_ms=duration
+        )
+    except Exception as e:
+        add_log("error", f"Failed to record inbound trace: {e}")
+        
+    return response
+
+@app.route('/admin/logs')
+def admin_logs():
+    """Secured endpoint to view logs"""
+    admin_secret = os.environ.get("ADMIN_SECRET", "supersecret123")
+    passed_key = request.args.get("key")
+    
+    if passed_key != admin_secret:
+        add_log("warning", f"Unauthorized access attempt to logs with key: {passed_key}")
+        return "Unauthorized. Please provide the correct ?key= parameter.", 401
+        
+    html = "<body style='background:#121212; color:#0f0; font-family:monospace; padding:20px;'>"
+    html += "<h1>Admin Dashboard - Production Logs</h1><hr/>"
+    for log in server_logs:
+        html += f"<p>[{log['timestamp']}] [{log['level'].upper()}] {log['message']}</p>"
+    html += "</body>"
+    return html
 
 @app.route('/admin/apigw')
 def admin_apigw():
-    from logger_store import LOGS
-    from network_store import USER_BEHAVIOR
-    return render_template('apigw.html', logs=LOGS, behavior=USER_BEHAVIOR)
+    """Returns the rich API Gateway HTML UI"""
+    admin_secret = os.environ.get("ADMIN_SECRET", "supersecret123")
+    passed_key = request.args.get("key")
+    
+    if passed_key != admin_secret:
+        return "Unauthorized. Please provide the correct ?key= parameter.", 401
+        
+    return render_template('apigw.html')
+
+@app.route('/api/traces')
+def api_traces():
+    admin_secret = os.environ.get("ADMIN_SECRET", "supersecret123")
+    passed_key = request.args.get("key")
+    if passed_key != admin_secret:
+        return jsonify({"error": "Unauthorized"}), 401
+    return jsonify(get_traces())
+
+@app.route('/')
+def serve_index():
+    # Record that the webapp was accessed
+    uid = request.args.get("uid", "anonymous")
+    record_user_behavior(uid, "webapp_opened", {"user_agent": request.headers.get('User-Agent')})
+    return app.send_static_file('index.html')
 
 @app.route('/api/order/web', methods=['POST'])
-def order_from_voice():
-    """Endpoint for web app Voice submissions."""
+def order_from_web():
+    """Endpoint for web app Voice audio submissions."""
     if 'audio' not in request.files:
         return jsonify({"error": "No audio file"}), 400
         
     audio_file = request.files['audio']
-    user_id = request.form.get("user_id", "anonymous_web_user")
-    
-    # Save temp file
-    temp_path = "/tmp/web_audio.webm"
+    temp_path = f"/tmp/web_audio_{int(time.time())}.wav"
     audio_file.save(temp_path)
     
-    add_log("info", f"Received Web Voice from User {user_id}")
+    user_id = request.form.get("user_id", "anonymous_web_user")
+    add_log("info", f"Received Web Audio from User {user_id}")
+    record_user_behavior(user_id, "webapp_voice_received", {"file_size": os.path.getsize(temp_path)})
     
-    # 1. Transcription (Mock for now, would use Whisper/Sarvam)
-    from sarvam import transcribe_audio
-    transcription = transcribe_audio(temp_path)
+    # 1. Transcribe
+    transcription = process_audio(temp_path)
+    add_log("info", f"Transcription: {transcription}")
     
     # 2. Process with Swiggy Universal Agent
     swiggy_text = run_agent_sync(transcription, session_id=str(user_id))
     
-    # Parse the LLM's JSON response
+    # Clean up the JSON if wrapped in markdown
     clean_json = swiggy_text.strip()
     if clean_json.startswith("```json"):
         clean_json = clean_json[7:]
@@ -67,6 +156,7 @@ def order_from_voice():
         clean_json = clean_json[:-3]
         
     try:
+        import json
         reply_json = json.loads(clean_json.strip())
         swiggy_text = reply_json.get("text", swiggy_text)
         options = reply_json.get("options", [])
@@ -110,6 +200,7 @@ def order_from_chat():
         clean_json = clean_json[:-3]
         
     try:
+        import json
         reply_json = json.loads(clean_json.strip())
         swiggy_text = reply_json.get("text", swiggy_text)
         options = reply_json.get("options", [])
