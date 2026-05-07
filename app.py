@@ -10,19 +10,74 @@ from swiggy_agent import run_agent_sync
 from logger_store import add_log, server_logs
 from network_store import record_trace, get_traces, record_user_behavior
 
-def send_telegram_msg_global(chat_id, text, parse_mode="Markdown", reply_markup=None):
+def telegram_api_request(method, endpoint, **kwargs):
     import requests
+    import time
+    import json
+    
     TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not TELEGRAM_BOT_TOKEN:
-        return
-    base_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+        return None
+        
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/{endpoint}"
+    if endpoint.startswith("http"):
+        url = endpoint
+        
+    start_time = time.time()
+    try:
+        if method.upper() == "POST":
+            response = requests.post(url, **kwargs)
+        else:
+            response = requests.get(url, **kwargs)
+            
+        duration = int((time.time() - start_time) * 1000)
+        
+        # Redact token from logged URL
+        log_url = url.replace(TELEGRAM_BOT_TOKEN, "***")
+        
+        req_body = kwargs.get("json", kwargs.get("data", ""))
+        if isinstance(req_body, dict):
+            req_body = json.dumps(req_body)
+            
+        content_type = response.headers.get("Content-Type", "")
+        # Don't save huge binary blobs in the DB
+        resp_body = response.text[:1000] if "audio" not in content_type and "octet-stream" not in content_type else "Binary File"
+            
+        record_trace(
+            direction="OUTBOUND",
+            method=method.upper(),
+            url=log_url,
+            request_headers=dict(response.request.headers),
+            request_body=str(req_body),
+            response_status=response.status_code,
+            response_headers=dict(response.headers),
+            response_body=resp_body,
+            duration_ms=duration
+        )
+        return response
+    except Exception as e:
+        duration = int((time.time() - start_time) * 1000)
+        log_url = url.replace(TELEGRAM_BOT_TOKEN, "***") if TELEGRAM_BOT_TOKEN else url
+        req_body = kwargs.get("json", kwargs.get("data", ""))
+        record_trace(
+            direction="OUTBOUND",
+            method=method.upper(),
+            url=log_url,
+            request_headers={},
+            request_body=str(req_body),
+            response_status=500,
+            response_headers={},
+            response_body=str(e),
+            duration_ms=duration
+        )
+        add_log("error", f"Telegram API error: {e}")
+        return None
+
+def send_telegram_msg_global(chat_id, text, parse_mode="Markdown", reply_markup=None):
     payload = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
     if reply_markup:
         payload["reply_markup"] = reply_markup
-    try:
-        requests.post(f"{base_url}/sendMessage", json=payload)
-    except Exception as e:
-        add_log("error", f"Failed to send telegram message: {e}")
+    telegram_api_request("POST", "sendMessage", json=payload)
 
 app = Flask(__name__, static_folder='static')
 
@@ -199,7 +254,7 @@ def telegram_webhook():
         action = cb["data"]
         
         # Acknowledge the callback so the button stops loading
-        requests.post(f"{base_url}/answerCallbackQuery", json={"callback_query_id": cb["id"]})
+        telegram_api_request("POST", "answerCallbackQuery", json={"callback_query_id": cb["id"]})
         
         add_log("info", f"Telegram Button Clicked: {action}")
         record_user_behavior(chat_id, "telegram_button_click", {"action": action})
@@ -225,7 +280,12 @@ def telegram_webhook():
         add_log("info", f"Received Telegram Voice Note from {sender_name}. File ID: {file_id}")
         record_user_behavior(chat_id, "telegram_voice_received", {"file_id": file_id})
         
-        file_info = requests.get(f"{base_url}/getFile?file_id={file_id}").json()
+        file_info_resp = telegram_api_request("GET", f"getFile?file_id={file_id}")
+        if not file_info_resp:
+            send_telegram_msg(chat_id, "Sorry, I couldn't process your voice note.")
+            return "OK", 200
+            
+        file_info = file_info_resp.json()
         if not file_info.get("ok"):
             send_telegram_msg(chat_id, "Sorry, I couldn't download your voice note.")
             return "OK", 200
@@ -233,7 +293,11 @@ def telegram_webhook():
         file_path = file_info["result"]["file_path"]
         download_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
         
-        audio_data = requests.get(download_url).content
+        audio_resp = telegram_api_request("GET", download_url)
+        if not audio_resp:
+            return "OK", 200
+            
+        audio_data = audio_resp.content
         temp_path = "/tmp/telegram_audio.ogg"
         with open(temp_path, "wb") as f:
             f.write(audio_data)
