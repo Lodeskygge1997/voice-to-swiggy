@@ -94,17 +94,26 @@ async def process_order_via_agent(transcription: str, session_id: str) -> str:
             
         CONVERSATIONS[session_id].append({"role": "user", "content": transcription})
         
-        response = await client.chat.completions.create(
-            model=model_name,
-            messages=CONVERSATIONS[session_id],
-            temperature=0.7
-        )
-        
-        reply_content = response.choices[0].message.content
-        CONVERSATIONS[session_id].append({"role": "assistant", "content": reply_content})
-        
-        add_log("success", f"Fallback agent execution completed for {session_id}.")
-        return reply_content
+        try:
+            response = await client.chat.completions.create(
+                model=model_name,
+                messages=CONVERSATIONS[session_id],
+                temperature=0.7
+            )
+            
+            reply_content = response.choices[0].message.content
+            CONVERSATIONS[session_id].append({"role": "assistant", "content": reply_content})
+            add_log("success", f"Fallback agent execution completed for {session_id}.")
+            return reply_content
+        except Exception as e:
+            add_log("error", f"LLM Generation Error: {str(e)}")
+            error_msg = str(e)
+            if "429" in error_msg:
+                return json.dumps({
+                    "text": "My servers are currently overwhelmed (Quota Exceeded). Please try again in a few moments, or switch to a different free provider like Groq.",
+                    "options": []
+                })
+            return json.dumps({"text": f"Agent Error: {error_msg}", "options": []})
         
     except Exception as e:
         add_log("error", f"Agent execution failed: {str(e)}")
