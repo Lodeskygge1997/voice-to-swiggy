@@ -1,82 +1,41 @@
 import os
 import time
-from flask import Flask, request, jsonify, render_template, send_from_directory, g
-from twilio.twiml.messaging_response import MessagingResponse
+import requests
+import asyncio
+from flask import Flask, request, jsonify, g, render_template
+from flask_cors import CORS
 from dotenv import load_dotenv
+
+# Import storage, logger, and agent logic
+from network_store import record_trace, get_traces, record_user_behavior
+from logger_store import add_log, server_logs
+from swiggy_agent import run_agent_sync
+
 load_dotenv()
 
-from sarvam import process_audio
-from swiggy_agent import run_agent_sync
-from logger_store import add_log, server_logs
-from network_store import record_trace, get_traces, record_user_behavior
+# We import the processing from sarvam if available, else fallback
+try:
+    from sarvam import process_audio
+except ImportError:
+    def process_audio(file_path):
+        return "(Audio transcription disabled due to missing credentials)"
 
 def telegram_api_request(method, endpoint, **kwargs):
-    import requests
-    import time
-    import json
-    
+    """Helper to make Telegram API calls safely."""
     TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not TELEGRAM_BOT_TOKEN:
+        add_log("error", "TELEGRAM_BOT_TOKEN is not set.")
         return None
         
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/{endpoint}"
-    if endpoint.startswith("http"):
-        url = endpoint
-        
-    start_time = time.time()
     try:
-        if method.upper() == "POST":
+        if method == "POST":
             response = requests.post(url, **kwargs)
         else:
             response = requests.get(url, **kwargs)
-            
-        duration = int((time.time() - start_time) * 1000)
-        
-        # Redact token from logged URL
-        log_url = url.replace(TELEGRAM_BOT_TOKEN, "***")
-        
-        req_body = kwargs.get("json", kwargs.get("data", ""))
-        if isinstance(req_body, dict):
-            req_body = json.dumps(req_body)
-            
-        content_type = response.headers.get("Content-Type", "")
-        # Don't save huge binary blobs in the DB
-        resp_body = response.text[:1000] if "audio" not in content_type and "octet-stream" not in content_type else "Binary File"
-            
-        try:
-            record_trace(
-                direction="OUTBOUND",
-                method=method.upper(),
-                url=log_url,
-                request_headers=dict(response.request.headers),
-                request_body=str(req_body),
-                response_status=response.status_code,
-                response_headers=dict(response.headers),
-                response_body=resp_body,
-                duration_ms=duration
-            )
-        except Exception as trace_e:
-            add_log("error", f"Failed to record outbound trace: {trace_e}")
-            
+        response.raise_for_status()
         return response
     except Exception as e:
-        duration = int((time.time() - start_time) * 1000)
-        log_url = url.replace(TELEGRAM_BOT_TOKEN, "***") if TELEGRAM_BOT_TOKEN else url
-        req_body = kwargs.get("json", kwargs.get("data", ""))
-        try:
-            record_trace(
-                direction="OUTBOUND",
-                method=method.upper(),
-                url=log_url,
-                request_headers={},
-                request_body=str(req_body),
-                response_status=500,
-                response_headers={},
-                response_body=str(e),
-                duration_ms=duration
-            )
-        except:
-            pass
         add_log("error", f"Telegram API error: {e}")
         return None
 
@@ -138,7 +97,7 @@ def admin_logs():
     html = "<body style='background:#121212; color:#0f0; font-family:monospace; padding:20px;'>"
     html += "<h1>Admin Dashboard - Production Logs</h1><hr/>"
     for log in server_logs:
-        html += f"<div>{log}</div>"
+        html += f"<p>[{log['timestamp']}] [{log['level'].upper()}] {log['message']}</p>"
     html += "</body>"
     return html
 
@@ -147,8 +106,10 @@ def admin_apigw():
     """Returns the rich API Gateway HTML UI"""
     admin_secret = os.environ.get("ADMIN_SECRET", "supersecret123")
     passed_key = request.args.get("key")
+    
     if passed_key != admin_secret:
         return "Unauthorized. Please provide the correct ?key= parameter.", 401
+        
     return render_template('apigw.html')
 
 @app.route('/api/traces')
@@ -160,83 +121,87 @@ def api_traces():
     return jsonify(get_traces())
 
 @app.route('/')
-def index():
+def serve_index():
+    # Record that the webapp was accessed
+    uid = request.args.get("uid", "anonymous")
+    record_user_behavior(uid, "webapp_opened", {"user_agent": request.headers.get('User-Agent')})
     return app.send_static_file('index.html')
 
 @app.route('/api/order/web', methods=['POST'])
 def order_from_web():
-    """Endpoint for the Web Interface to send audio recordings."""
-    add_log("info", "Received audio upload from Web Interface")
-    
+    """Endpoint for web app Voice audio submissions."""
     if 'audio' not in request.files:
-        add_log("error", "No audio file provided in web request")
-        return jsonify({"error": "No audio file provided"}), 400
+        return jsonify({"error": "No audio file"}), 400
         
     audio_file = request.files['audio']
-    temp_path = "/tmp/web_audio.wav"
+    temp_path = f"/tmp/web_audio_{int(time.time())}.wav"
     audio_file.save(temp_path)
-    add_log("info", f"Saved audio file to {temp_path}")
     
-    user_id = request.form.get("user_id", "web_user")
-    record_user_behavior(user_id, "web_voice_order_received", {"path": temp_path})
+    user_id = request.form.get("user_id", "anonymous_web_user")
+    add_log("info", f"Received Web Audio from User {user_id}")
+    record_user_behavior(user_id, "webapp_voice_received", {"file_size": os.path.getsize(temp_path)})
     
-    # 1. Process with Sarvam
-    text = process_audio(temp_path)
+    # 1. Transcribe
+    transcription = process_audio(temp_path)
+    add_log("info", f"Transcription: {transcription}")
     
-    # 2. Process with Swiggy MCP Agent
-    response_msg = run_agent_sync(text, session_id=user_id)
+    # 2. Process with Swiggy Universal Agent
+    swiggy_text = run_agent_sync(transcription, session_id=str(user_id))
     
-    # Send confirmation to Telegram
+    # Clean up the JSON if wrapped in markdown
+    clean_json = swiggy_text.strip()
+    if clean_json.startswith("```json"):
+        clean_json = clean_json[7:]
+    if clean_json.endswith("```"):
+        clean_json = clean_json[:-3]
+        
+    try:
+        reply_json = json.loads(clean_json.strip())
+        swiggy_text = reply_json.get("text", swiggy_text)
+    except Exception:
+        pass
+    
     if user_id and user_id != "anonymous_web_user":
-        try:
-            import json
-            clean_json = response_msg.strip()
-            if clean_json.startswith("```json"): clean_json = clean_json[7:]
-            if clean_json.endswith("```"): clean_json = clean_json[:-3]
-            parsed = json.loads(clean_json.strip())
-            swiggy_text = parsed.get("text", response_msg)
-        except:
-            swiggy_text = response_msg
-            
         send_telegram_msg_global(
             chat_id=user_id,
-            text=f"✅ Voice Order Processed\nI heard: _{text}_\n\n🛍️ Swiggy: {swiggy_text}"
+            text=f"🎙️ Web Voice Processed\nYou said: _{transcription}_\n\n🛍️ Swiggy: {swiggy_text}"
         )
-    
+            
     return jsonify({
-        "transcription": text,
+        "transcription": transcription,
         "message": swiggy_text,
         "cart": []
     })
 
 @app.route('/api/order/chat', methods=['POST'])
 def order_from_chat():
-    """Endpoint for the Web Interface to send text."""
+    """Endpoint for web app Text submissions."""
     data = request.json
     if not data or 'text' not in data:
         return jsonify({"error": "No text provided"}), 400
         
     text = data['text']
-    user_id = data.get('user_id', 'web_user')
+    user_id = data.get("user_id", "anonymous_web_user")
     
-    add_log("info", f"Received text from Web Interface: {text}")
-    record_user_behavior(user_id, "web_chat_received", {"text": text})
+    add_log("info", f"Received Web Chat from User {user_id}: {text}")
+    record_user_behavior(user_id, "webapp_text_received", {"text": text})
     
-    # Process with Swiggy MCP Agent
-    response_msg = run_agent_sync(text, session_id=user_id)
+    # Process with Swiggy Universal Agent
+    swiggy_text = run_agent_sync(text, session_id=str(user_id))
     
-    # Parse agent response
+    # Parse the LLM's JSON response
+    clean_json = swiggy_text.strip()
+    if clean_json.startswith("```json"):
+        clean_json = clean_json[7:]
+    if clean_json.endswith("```"):
+        clean_json = clean_json[:-3]
+        
     try:
-        import json
-        clean_json = response_msg.strip()
-        if clean_json.startswith("```json"): clean_json = clean_json[7:]
-        if clean_json.endswith("```"): clean_json = clean_json[:-3]
-        parsed = json.loads(clean_json.strip())
-        swiggy_text = parsed.get("text", response_msg)
-    except:
-        swiggy_text = response_msg
-
-    # Send confirmation to Telegram
+        reply_json = json.loads(clean_json.strip())
+        swiggy_text = reply_json.get("text", swiggy_text)
+    except Exception:
+        pass
+    
     if user_id and user_id != "anonymous_web_user":
         send_telegram_msg_global(
             chat_id=user_id,
@@ -366,6 +331,16 @@ def telegram_webhook():
         
         process_and_reply(chat_id, sender_name, text)
         
+    # If it's a contact sharing message
+    elif "contact" in message:
+        phone = message["contact"]["phone_number"]
+        add_log("info", f"Received Contact from {sender_name}: {phone}")
+        record_user_behavior(chat_id, "telegram_contact_received", {"phone": phone})
+        
+        # Remove the contact keyboard and confirm
+        send_telegram_msg(chat_id, f"✅ Phone number {phone} authenticated successfully! You can now place your Swiggy orders.", reply_markup={"remove_keyboard": True})
+        return "OK", 200
+
     # If it's a text message
     elif "text" in message:
         text = message["text"]
@@ -378,6 +353,16 @@ def telegram_webhook():
                 if str(chat_id) in CONVERSATIONS:
                     del CONVERSATIONS[str(chat_id)]
                 send_telegram_msg(chat_id, "🔄 Session Killed. Memory wiped!")
+                
+            # Send Contact Request Keyboard first for Authentication
+            auth_kb = {
+                "keyboard": [
+                    [{"text": "📱 Share Mobile Number", "request_contact": True}]
+                ],
+                "resize_keyboard": True,
+                "one_time_keyboard": True
+            }
+            send_telegram_msg(chat_id, "Please authenticate by sharing your mobile number. Swiggy requires this to process your orders.", reply_markup=auth_kb)
                 
             host = request.host_url.rstrip('/')
             web_app_url = f"{host}/?uid={chat_id}"
