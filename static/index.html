@@ -2,15 +2,13 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voice to Swiggy | Order with your voice</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Voice to Swiggy</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
-
         :root {
-            --primary: #fc8019; /* Swiggy orange */
-            --primary-dark: #e06c0b;
+            --primary: #fc8019;
+            --primary-dark: #e67000;
             --bg: #121212;
             --surface: #1e1e1e;
             --text: #ffffff;
@@ -18,135 +16,134 @@
         }
 
         * {
+            box-sizing: border-box;
             margin: 0;
             padding: 0;
-            box-sizing: border-box;
-            font-family: 'Outfit', sans-serif;
+            -webkit-tap-highlight-color: transparent;
         }
 
         body {
+            font-family: 'Outfit', sans-serif;
             background-color: var(--bg);
             color: var(--text);
-            min-height: 100vh;
             display: flex;
             flex-direction: column;
             align-items: center;
-            padding: 2rem;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+            overscroll-behavior-y: none;
         }
 
         header {
             text-align: center;
-            margin-bottom: 3rem;
-            margin-top: 2rem;
+            margin-bottom: 2rem;
+            position: absolute;
+            top: 2rem;
         }
 
         h1 {
-            font-size: 2.5rem;
-            font-weight: 700;
-            margin-bottom: 0.5rem;
-            background: linear-gradient(90deg, #fc8019, #ffb347);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: var(--primary);
+            font-weight: 600;
+            font-size: 2rem;
+            letter-spacing: -0.5px;
         }
 
-        p.subtitle {
+        .subtitle {
             color: var(--text-muted);
-            font-size: 1.1rem;
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
         }
 
         main {
-            background: var(--surface);
-            padding: 3rem;
-            border-radius: 24px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-            text-align: center;
-            max-width: 500px;
-            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 90%;
+            max-width: 400px;
         }
 
         .mic-button {
             width: 120px;
             height: 120px;
             border-radius: 50%;
-            background: linear-gradient(135deg, var(--primary), #ff6b6b);
+            background: var(--primary);
             border: none;
             cursor: pointer;
             display: flex;
             justify-content: center;
             align-items: center;
-            margin: 0 auto 2rem;
-            transition: all 0.3s ease;
-            box-shadow: 0 10px 20px rgba(252, 128, 25, 0.3);
+            box-shadow: 0 0 30px rgba(252, 128, 25, 0.4);
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             position: relative;
         }
 
-        .mic-button:hover {
-            transform: scale(1.05);
-            box-shadow: 0 15px 25px rgba(252, 128, 25, 0.4);
+        .mic-button:active {
+            transform: scale(0.9);
+            box-shadow: 0 0 10px rgba(252, 128, 25, 0.6);
         }
 
         .mic-button.recording {
             animation: pulse 1.5s infinite;
-            background: #ff4757;
+            background: #ff4d4d;
         }
 
         @keyframes pulse {
-            0% { box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.7); }
-            70% { box-shadow: 0 0 0 20px rgba(255, 71, 87, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(255, 71, 87, 0); }
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 77, 77, 0.7); }
+            70% { transform: scale(1.05); box-shadow: 0 0 0 20px rgba(255, 77, 77, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 77, 77, 0); }
         }
 
         .mic-icon {
-            width: 40px;
-            height: 40px;
+            width: 48px;
+            height: 48px;
             fill: white;
         }
 
         .status {
-            font-size: 1.2rem;
-            font-weight: 600;
-            margin-bottom: 1rem;
-            height: 30px;
+            margin-top: 2rem;
+            font-size: 1.1rem;
+            font-weight: 300;
+            color: var(--text);
+            text-align: center;
         }
 
         .result-box {
             margin-top: 2rem;
-            text-align: left;
-            background: rgba(0,0,0,0.3);
+            background: var(--surface);
             padding: 1.5rem;
-            border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.1);
-            display: none;
+            border-radius: 20px;
+            width: 100%;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.5s ease;
         }
 
         .result-box.visible {
-            display: block;
-            animation: fadeIn 0.5s ease forwards;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
+            opacity: 1;
+            transform: translateY(0);
         }
 
         .label {
-            font-size: 0.9rem;
-            color: var(--primary);
+            font-size: 0.7rem;
             text-transform: uppercase;
-            letter-spacing: 1px;
+            color: var(--primary);
+            font-weight: 600;
             margin-bottom: 0.5rem;
-            font-weight: 700;
         }
 
         .transcription {
-            font-size: 1.1rem;
-            margin-bottom: 1.5rem;
+            font-size: 1rem;
+            line-height: 1.4;
+            margin-bottom: 1rem;
             font-style: italic;
         }
 
         .response {
             font-size: 1.1rem;
             line-height: 1.5;
+            font-weight: 400;
         }
 
         .loader {
@@ -232,6 +229,99 @@
             height: 20px;
             stroke: white;
         }
+
+        /* Bottom Sheet Styles */
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(4px);
+        }
+        .overlay.open {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .bottom-sheet {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--surface);
+            border-radius: 24px 24px 0 0;
+            padding: 2rem;
+            z-index: 1001;
+            transform: translateY(100%);
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        .bottom-sheet.open {
+            transform: translateY(0);
+        }
+
+        .sheet-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .close-sheet {
+            background: rgba(255,255,255,0.1);
+            border: none;
+            color: white;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 1.2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .auth-input {
+            width: 100%;
+            background: var(--bg);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 1rem;
+            color: white;
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.1rem;
+            margin-bottom: 1rem;
+            outline: none;
+        }
+        .auth-input:focus {
+            border-color: var(--primary);
+        }
+
+        .auth-btn {
+            width: 100%;
+            background: var(--primary);
+            border: none;
+            border-radius: 12px;
+            padding: 1rem;
+            color: white;
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .otp-input {
+            letter-spacing: 0.5rem;
+            text-align: center;
+            font-size: 1.5rem;
+        }
     </style>
 </head>
 <body>
@@ -268,6 +358,7 @@
             <div class="transcription" id="transcriptionText">"I want paneer tikka"</div>
             <div class="label">Swiggy Says:</div>
             <div class="response" id="responseText">Success!</div>
+            <div class="options-container" id="optionsContainer" style="display: flex; flex-direction: column; gap: 8px; margin-top: 15px;"></div>
         </div>
         
         <div class="menu-hint">
@@ -298,95 +389,10 @@
         </div>
     </div>
 
-    <style>
-        .overlay {
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.6);
-            backdrop-filter: blur(4px);
-            z-index: 99;
-            display: none;
-            opacity: 0;
-            transition: opacity 0.3s;
-        }
-        
-        .bottom-sheet {
-            position: fixed;
-            bottom: -100%;
-            left: 0;
-            right: 0;
-            background: var(--surface);
-            border-radius: 24px 24px 0 0;
-            padding: 2rem;
-            z-index: 100;
-            transition: bottom 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            box-shadow: 0 -10px 40px rgba(0,0,0,0.5);
-            border-top: 1px solid rgba(255,255,255,0.1);
-        }
-
-        .bottom-sheet.open {
-            bottom: 0;
-        }
-        
-        .overlay.open {
-            display: block;
-            opacity: 1;
-        }
-
-        .sheet-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1.5rem;
-        }
-        
-        .sheet-header h3 {
-            font-size: 1.4rem;
-            color: white;
-        }
-        
-        .close-sheet {
-            background: none;
-            border: none;
-            color: var(--text-muted);
-            font-size: 2rem;
-            cursor: pointer;
-        }
-
-        .auth-input {
-            width: 100%;
-            padding: 1rem 1.5rem;
-            border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.2);
-            background: rgba(0,0,0,0.4);
-            color: white;
-            font-size: 1.2rem;
-            outline: none;
-            margin-bottom: 1.5rem;
-            text-align: center;
-            letter-spacing: 2px;
-        }
-        
-        .auth-input:focus { border-color: var(--primary); }
-        
-        .otp-input { letter-spacing: 8px; font-size: 1.5rem; font-weight: bold; }
-
-        .auth-btn {
-            width: 100%;
-            padding: 1rem;
-            border-radius: 12px;
-            background: var(--primary);
-            color: white;
-            font-size: 1.1rem;
-            font-weight: 600;
-            border: none;
-            cursor: pointer;
-            transition: 0.2s;
-        }
-        .auth-btn:hover { background: var(--primary-dark); }
-    </style>
-
     <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const userId = urlParams.get('uid') || 'anonymous_web_user';
+
         const micBtn = document.getElementById('micBtn');
         const statusText = document.getElementById('statusText');
         const recordingState = document.getElementById('recordingState');
@@ -399,41 +405,20 @@
         let audioChunks = [];
         let isRecording = false;
 
-        // Initialize Telegram Web App if opened inside Telegram
-        if (window.Telegram && window.Telegram.WebApp) {
-            window.Telegram.WebApp.ready();
-            window.Telegram.WebApp.expand();
-            
-            // Apply Telegram theme colors to UI
-            const theme = window.Telegram.WebApp.themeParams;
-            if (theme.bg_color) {
-                document.documentElement.style.setProperty('--bg', theme.bg_color);
-            }
-            if (theme.text_color) {
-                document.documentElement.style.setProperty('--text', theme.text_color);
-            }
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    mediaRecorder = new MediaRecorder(stream);
+                    mediaRecorder.ondataavailable = (event) => {
+                        audioChunks.push(event.data);
+                    };
+                    mediaRecorder.onstop = sendAudioToServer;
+                })
+                .catch(err => {
+                    console.error("Microphone access denied:", err);
+                    statusText.innerText = "Mic access denied";
+                });
         }
-
-        const urlParams = new URLSearchParams(window.location.search);
-        const userId = urlParams.get('uid') || 'anonymous_web_user';
-
-        async function initAudio() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                mediaRecorder = new MediaRecorder(stream);
-
-                mediaRecorder.ondataavailable = event => {
-                    audioChunks.push(event.data);
-                };
-
-                mediaRecorder.onstop = sendAudioToServer;
-            } catch (err) {
-                console.error("Microphone access denied", err);
-                statusText.innerText = "Microphone access denied";
-            }
-        }
-
-        initAudio();
 
         micBtn.addEventListener('mousedown', startRecording);
         micBtn.addEventListener('touchstart', startRecording);
@@ -485,6 +470,24 @@
                 transcriptionText.innerText = `"${data.transcription}"`;
                 responseText.innerText = data.message;
                 
+                const optionsContainer = document.getElementById('optionsContainer');
+                optionsContainer.innerHTML = '';
+                if(data.options && data.options.length > 0) {
+                    data.options.forEach(opt => {
+                        const btn = document.createElement('button');
+                        btn.className = 'auth-btn';
+                        btn.style.marginTop = '4px';
+                        btn.style.padding = '10px';
+                        btn.style.fontSize = '0.9rem';
+                        btn.innerText = opt.label;
+                        btn.onclick = () => {
+                            document.getElementById('chatInput').value = opt.action;
+                            sendTextToServer();
+                        };
+                        optionsContainer.appendChild(btn);
+                    });
+                }
+                
                 // Show results
                 loadingState.style.display = 'none';
                 recordingState.style.display = 'block';
@@ -526,6 +529,24 @@
                 
                 transcriptionText.innerText = `"${data.transcription}"`;
                 responseText.innerText = data.message;
+                
+                const optionsContainer = document.getElementById('optionsContainer');
+                optionsContainer.innerHTML = '';
+                if(data.options && data.options.length > 0) {
+                    data.options.forEach(opt => {
+                        const btn = document.createElement('button');
+                        btn.className = 'auth-btn';
+                        btn.style.marginTop = '4px';
+                        btn.style.padding = '10px';
+                        btn.style.fontSize = '0.9rem';
+                        btn.innerText = opt.label;
+                        btn.onclick = () => {
+                            document.getElementById('chatInput').value = opt.action;
+                            sendTextToServer();
+                        };
+                        optionsContainer.appendChild(btn);
+                    });
+                }
                 
                 // Show results
                 loadingState.style.display = 'none';
@@ -609,6 +630,11 @@
                     verifyOtpBtn.innerText = "Verify & Login";
                     closeAuthSheet();
                     statusText.innerText = "Logged in successfully!";
+                    
+                    // Trigger the LLM welcome menu automatically
+                    chatInput.value = "Hello, I am ready to start an order.";
+                    sendTextToServer();
+
                     setTimeout(() => statusText.innerText = "Hold to Speak", 2000);
                 }, 1000);
             } else {
