@@ -271,7 +271,14 @@ def telegram_webhook():
         record_user_behavior(chat_id, "telegram_button_click", {"action": action})
         
         if action == "start_chat":
-            send_telegram_msg(chat_id, "Great! 💬 What are you craving today?\n\n(You can order food, groceries via Instamart, or book a Dineout table!)")
+            send_telegram_msg(chat_id, "Great! 💬 What are you craving today?\n\n_(You can order food, groceries via Instamart, or book a Dineout table!)_")
+            return "OK", 200
+            
+        if action == "reset_session":
+            from swiggy_agent import CONVERSATIONS
+            if str(chat_id) in CONVERSATIONS:
+                del CONVERSATIONS[str(chat_id)]
+            send_telegram_msg(chat_id, "🔄 Session Killed. Memory wiped!\n\nSend /start to begin a new order.")
             return "OK", 200
             
         process_and_reply(chat_id, cb["from"].get("first_name", "User"), action)
@@ -325,13 +332,20 @@ def telegram_webhook():
         add_log("info", f"Received Telegram Text from {sender_name}: {text}")
         record_user_behavior(chat_id, "telegram_text_received", {"text": text})
         
-        if text == "/start":
+        if text in ["/start", "/reset", "/cancel"]:
+            if text in ["/reset", "/cancel"]:
+                from swiggy_agent import CONVERSATIONS
+                if str(chat_id) in CONVERSATIONS:
+                    del CONVERSATIONS[str(chat_id)]
+                send_telegram_msg(chat_id, "🔄 Session Killed. Memory wiped!")
+                
             host = request.host_url.rstrip('/')
             web_app_url = f"{host}/?uid={chat_id}"
             kb = {
                 "inline_keyboard": [
                     [{"text": "📞 Live Call", "web_app": {"url": web_app_url}}],
-                    [{"text": "💬 Interactive Chat", "callback_data": "start_chat"}]
+                    [{"text": "💬 Interactive Chat", "callback_data": "start_chat"}],
+                    [{"text": "🔄 Kill Session", "callback_data": "reset_session"}]
                 ]
             }
             send_telegram_msg(chat_id, f"Hello {sender_name}! 🍔 Welcome to Voice-to-Swiggy.\n\nChoose an option below to begin:", reply_markup=kb)

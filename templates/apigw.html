@@ -100,51 +100,43 @@
         .trace-meta {
             display: flex;
             justify-content: space-between;
-            font-size: 0.75rem;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 0.8rem;
             color: var(--text-secondary);
-            margin-bottom: 6px;
         }
 
-        .trace-badge {
-            font-size: 0.65rem;
+        .method {
+            font-family: var(--font-mono);
+            font-weight: 600;
             padding: 2px 6px;
             border-radius: 4px;
-            font-weight: 600;
-            letter-spacing: 0.5px;
+            font-size: 0.75rem;
         }
 
-        .badge-inbound { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
-        .badge-outbound { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+        .method.GET { background: rgba(59, 130, 246, 0.1); color: #60a5fa; }
+        .method.POST { background: rgba(16, 185, 129, 0.1); color: #34d399; }
+        .method.PUT { background: rgba(245, 158, 11, 0.1); color: #fbbf24; }
+        .method.DELETE { background: rgba(239, 68, 68, 0.1); color: #f87171; }
 
-        .trace-title {
-            font-size: 0.85rem;
+        .status {
             font-family: var(--font-mono);
+            font-weight: 500;
+        }
+        .status.success { color: var(--success); }
+        .status.warning { color: var(--warning); }
+        .status.error { color: var(--danger); }
+
+        .trace-path {
+            font-size: 0.9rem;
+            font-weight: 500;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            display: flex;
-            align-items: center;
-            gap: 8px;
         }
 
-        .method { font-weight: 700; }
-        .method.GET { color: #34d399; }
-        .method.POST { color: #60a5fa; }
-        .method.PUT { color: #fbbf24; }
-        .method.DELETE { color: #f87171; }
-
-        .status-pill {
-            font-size: 0.7rem;
-            padding: 2px 6px;
-            border-radius: 10px;
-            font-family: var(--font-mono);
-        }
-        .status-2xx { background: rgba(16, 185, 129, 0.1); color: var(--success); }
-        .status-3xx { background: rgba(245, 158, 11, 0.1); color: var(--warning); }
-        .status-4xx, .status-5xx { background: rgba(239, 68, 68, 0.1); color: var(--danger); }
-
-        /* Main View */
-        .main {
+        /* Detail View */
+        .main-content {
             flex: 1;
             display: flex;
             flex-direction: column;
@@ -231,6 +223,8 @@
             font-size: 0.8rem;
             color: #e2e8f0;
             overflow-x: auto;
+            overflow-y: auto;
+            max-height: 500px;
             white-space: pre-wrap;
             word-wrap: break-word;
         }
@@ -248,45 +242,49 @@
     <div class="sidebar">
         <div class="header">
             <h1><div class="pulse"></div> API Gateway</h1>
-            <div style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 5px;">Network Traffic Monitor</div>
+            <p style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 5px;">Real-time Network Monitor</p>
         </div>
         <div class="trace-list" id="traceList">
-            <!-- Items injected by JS -->
+            <!-- Traces injected here -->
+            <div style="padding: 20px; text-align: center; color: var(--text-secondary);">Loading...</div>
         </div>
     </div>
 
-    <div class="main">
+    <div class="main-content">
         <div class="empty-state" id="emptyState">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-            <p>Select a request to view details</p>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            <h2>Select a Request</h2>
+            <p>Click on a trace from the sidebar to view details.</p>
         </div>
 
         <div class="detail-view" id="detailView">
             <div class="detail-header">
-                <div class="detail-url"><span id="dMethod" class="method"></span> <span id="dUrl"></span></div>
+                <div class="detail-url" id="d-url"></div>
                 <div class="detail-stats">
-                    <span id="dStatus" class="status-pill"></span>
-                    <span>⏱ <span id="dTime"></span>ms</span>
-                    <span>📅 <span id="dTimestamp"></span></span>
-                    <span id="dDirection" class="trace-badge"></span>
+                    <span id="d-direction"></span>
+                    <span id="d-status"></span>
+                    <span id="d-time"></span>
+                    <span id="d-duration"></span>
                 </div>
             </div>
             <div class="detail-body">
                 <div class="section">
                     <div class="section-header">Request Headers</div>
-                    <pre id="dReqHeaders"></pre>
+                    <pre id="d-req-headers"></pre>
                 </div>
                 <div class="section">
                     <div class="section-header">Request Body</div>
-                    <pre id="dReqBody"></pre>
+                    <pre id="d-req-body"></pre>
                 </div>
                 <div class="section">
                     <div class="section-header">Response Headers</div>
-                    <pre id="dResHeaders"></pre>
+                    <pre id="d-res-headers"></pre>
                 </div>
                 <div class="section">
                     <div class="section-header">Response Body</div>
-                    <pre id="dResBody"></pre>
+                    <pre id="d-res-body"></pre>
                 </div>
             </div>
         </div>
@@ -294,86 +292,97 @@
 
     <script>
         let allTraces = [];
-        const secretKey = new URLSearchParams(window.location.search).get('key') || '';
 
-        function fetchTraces() {
-            fetch(`/api/traces?key=${secretKey}`)
-                .then(res => res.json())
-                .then(data => {
-                    allTraces = data;
-                    renderList();
-                });
+        async function fetchTraces() {
+            try {
+                // Fetch traces from the API (requires the same key)
+                const urlParams = new URLSearchParams(window.location.search);
+                const key = urlParams.get('key');
+                const response = await fetch(`/api/traces?key=${key}`);
+                const traces = await response.json();
+                
+                if (traces.error) {
+                    document.getElementById('traceList').innerHTML = `<div style="padding: 20px; color: var(--danger); text-align: center;">${traces.error}</div>`;
+                    return;
+                }
+
+                allTraces = traces;
+                renderTraceList();
+            } catch (error) {
+                console.error("Failed to fetch traces", error);
+            }
         }
 
         function formatJSON(str) {
+            if (!str) return 'Empty';
             try {
-                return JSON.stringify(JSON.parse(str), null, 2);
+                // If it's a stringified JSON, parse and pretty print
+                const obj = JSON.parse(str);
+                return JSON.stringify(obj, null, 2);
             } catch (e) {
+                // If not JSON, return as is
                 return str;
             }
         }
 
-        function getStatusClass(code) {
-            if (code >= 200 && code < 300) return 'status-2xx';
-            if (code >= 300 && code < 400) return 'status-3xx';
-            return 'status-4xx';
-        }
+        function renderTraceList() {
+            const listEl = document.getElementById('traceList');
+            listEl.innerHTML = '';
 
-        function renderList() {
-            const list = document.getElementById('traceList');
-            list.innerHTML = '';
-            
-            allTraces.forEach((t, i) => {
-                const el = document.createElement('div');
-                el.className = 'trace-item';
-                el.onclick = () => showDetail(i);
+            if (allTraces.length === 0) {
+                listEl.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">No traces recorded yet.</div>';
+                return;
+            }
+
+            allTraces.forEach(trace => {
+                const item = document.createElement('div');
+                item.className = 'trace-item';
                 
-                const dirClass = t.direction === 'INBOUND' ? 'badge-inbound' : 'badge-outbound';
-                const statusClass = getStatusClass(t.response_status);
+                let statusClass = 'success';
+                if (trace.response_status >= 400) statusClass = 'error';
+                else if (trace.response_status >= 300) statusClass = 'warning';
 
-                el.innerHTML = `
+                const path = new URL(trace.url).pathname + new URL(trace.url).search;
+
+                item.innerHTML = `
                     <div class="trace-meta">
-                        <span>${t.timestamp}</span>
-                        <span class="trace-badge ${dirClass}">${t.direction}</span>
+                        <span class="method ${trace.method}">${trace.method}</span>
+                        <span class="status ${statusClass}">${trace.response_status || 'ERR'}</span>
                     </div>
-                    <div class="trace-title">
-                        <span class="status-pill ${statusClass}">${t.response_status || 'ERR'}</span>
-                        <span class="method ${t.method}">${t.method}</span>
-                        <span style="flex:1; overflow:hidden; text-overflow:ellipsis;">${t.url.split('?')[0].split('/').pop() || '/'}</span>
+                    <div class="trace-path">${path}</div>
+                    <div class="trace-meta" style="margin-top: 8px; margin-bottom: 0;">
+                        <span>${trace.timestamp}</span>
+                        <span>${trace.duration_ms}ms</span>
                     </div>
                 `;
-                list.appendChild(el);
+
+                item.onclick = () => {
+                    document.querySelectorAll('.trace-item').forEach(el => el.classList.remove('active'));
+                    item.classList.add('active');
+                    showDetails(trace);
+                };
+
+                listEl.appendChild(item);
             });
         }
 
-        function showDetail(index) {
-            const t = allTraces[index];
-            document.querySelectorAll('.trace-item').forEach((el, i) => {
-                el.classList.toggle('active', i === index);
-            });
-
+        function showDetails(trace) {
             document.getElementById('emptyState').style.display = 'none';
             document.getElementById('detailView').style.display = 'flex';
 
-            document.getElementById('dMethod').textContent = t.method;
-            document.getElementById('dMethod').className = `method ${t.method}`;
-            document.getElementById('dUrl').textContent = t.url;
+            document.getElementById('d-url').textContent = trace.url;
             
-            const statusEl = document.getElementById('dStatus');
-            statusEl.textContent = t.response_status || 'ERROR';
-            statusEl.className = `status-pill ${getStatusClass(t.response_status)}`;
-
-            document.getElementById('dTime').textContent = t.duration_ms;
-            document.getElementById('dTimestamp').textContent = t.timestamp;
+            document.getElementById('d-direction').innerHTML = `<strong style="color:var(--text-primary)">Direction:</strong> ${trace.direction}`;
+            document.getElementById('d-time').innerHTML = `<strong style="color:var(--text-primary)">Time:</strong> ${trace.timestamp}`;
+            document.getElementById('d-duration').innerHTML = `<strong style="color:var(--text-primary)">Duration:</strong> ${trace.duration_ms}ms`;
             
-            const dirEl = document.getElementById('dDirection');
-            dirEl.textContent = t.direction;
-            dirEl.className = `trace-badge ${t.direction === 'INBOUND' ? 'badge-inbound' : 'badge-outbound'}`;
+            let statusColor = trace.response_status >= 400 ? 'var(--danger)' : 'var(--success)';
+            document.getElementById('d-status').innerHTML = `<strong style="color:var(--text-primary)">Status:</strong> <span style="color:${statusColor}">${trace.response_status || 'ERR'}</span>`;
 
-            document.getElementById('dReqHeaders').textContent = formatJSON(JSON.stringify(t.request_headers));
-            document.getElementById('dReqBody').textContent = formatJSON(t.request_body) || '(Empty Body)';
-            document.getElementById('dResHeaders').textContent = formatJSON(JSON.stringify(t.response_headers));
-            document.getElementById('dResBody').textContent = formatJSON(t.response_body) || '(Empty Body)';
+            document.getElementById('d-req-headers').textContent = formatJSON(trace.request_headers);
+            document.getElementById('d-req-body').textContent = formatJSON(trace.request_body);
+            document.getElementById('d-res-headers').textContent = formatJSON(trace.response_headers);
+            document.getElementById('d-res-body').textContent = formatJSON(trace.response_body);
         }
 
         // Poll every 3 seconds
