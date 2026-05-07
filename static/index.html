@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Voice to Swiggy | Order with your voice</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
 
@@ -224,6 +225,24 @@
         let audioChunks = [];
         let isRecording = false;
 
+        // Initialize Telegram Web App if opened inside Telegram
+        if (window.Telegram && window.Telegram.WebApp) {
+            window.Telegram.WebApp.ready();
+            window.Telegram.WebApp.expand();
+            
+            // Apply Telegram theme colors to UI
+            const theme = window.Telegram.WebApp.themeParams;
+            if (theme.bg_color) {
+                document.documentElement.style.setProperty('--bg', theme.bg_color);
+            }
+            if (theme.text_color) {
+                document.documentElement.style.setProperty('--text', theme.text_color);
+            }
+        }
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const userId = urlParams.get('uid') || 'anonymous_web_user';
+
         async function initAudio() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -278,6 +297,7 @@
 
             const formData = new FormData();
             formData.append('audio', audioBlob, 'recording.webm');
+            formData.append('user_id', userId);
 
             try {
                 const response = await fetch('/api/order/web', {

@@ -40,7 +40,10 @@ async def process_order_via_agent(transcription):
         
         agent = Agent(
             name="FoodOrderingAgent",
-            instructions="Help users order food on Swiggy. Always call get_addresses first, then search_restaurants.",
+            instructions="Help users order food on Swiggy. Always call get_addresses first, then search_restaurants. "
+                         "CRITICAL: You must ALWAYS respond with a strictly formatted JSON object. "
+                         "Schema: {\"text\": \"Your natural language response here\", \"options\": [{\"label\": \"Button Text\", \"action\": \"User prompt representing the button action\"}]}. "
+                         "Provide 'options' as an array of logical next steps for the user. Do NOT wrap in markdown.",
             mcp_servers=[swiggy_food],
         )
         
