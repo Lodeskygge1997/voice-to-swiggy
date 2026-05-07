@@ -209,6 +209,46 @@ def order_from_web():
         "cart": []
     })
 
+@app.route('/api/order/chat', methods=['POST'])
+def order_from_chat():
+    """Endpoint for the Web Interface to send text."""
+    data = request.json
+    if not data or 'text' not in data:
+        return jsonify({"error": "No text provided"}), 400
+        
+    text = data['text']
+    user_id = data.get('user_id', 'web_user')
+    
+    add_log("info", f"Received text from Web Interface: {text}")
+    record_user_behavior(user_id, "web_chat_received", {"text": text})
+    
+    # Process with Swiggy MCP Agent
+    response_msg = run_agent_sync(text, session_id=user_id)
+    
+    # Parse agent response
+    try:
+        import json
+        clean_json = response_msg.strip()
+        if clean_json.startswith("```json"): clean_json = clean_json[7:]
+        if clean_json.endswith("```"): clean_json = clean_json[:-3]
+        parsed = json.loads(clean_json.strip())
+        swiggy_text = parsed.get("text", response_msg)
+    except:
+        swiggy_text = response_msg
+
+    # Send confirmation to Telegram
+    if user_id and user_id != "anonymous_web_user":
+        send_telegram_msg_global(
+            chat_id=user_id,
+            text=f"💬 Web Chat Processed\nYou said: _{text}_\n\n🛍️ Swiggy: {swiggy_text}"
+        )
+            
+    return jsonify({
+        "transcription": text,
+        "message": swiggy_text,
+        "cart": []
+    })
+
 @app.route('/api/telegram/webhook', methods=['POST'])
 def telegram_webhook():
     """Webhook endpoint for Telegram Bot."""

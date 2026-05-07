@@ -176,6 +176,53 @@
             font-size: 0.9rem;
             color: var(--text-muted);
         }
+
+        .chat-interface {
+            margin-top: 2rem;
+            display: flex;
+            width: 100%;
+            gap: 10px;
+        }
+
+        #chatInput {
+            flex: 1;
+            padding: 1rem 1.5rem;
+            border-radius: 24px;
+            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(0,0,0,0.4);
+            color: white;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        #chatInput:focus {
+            border-color: var(--primary);
+        }
+
+        #sendBtn {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: var(--primary);
+            border: none;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: all 0.2s;
+        }
+
+        #sendBtn:hover {
+            background: var(--primary-dark);
+            transform: scale(1.05);
+        }
+
+        #sendBtn svg {
+            width: 20px;
+            height: 20px;
+            stroke: white;
+        }
     </style>
 </head>
 <body>
@@ -198,6 +245,13 @@
         <div id="loadingState">
             <span class="loader"></span>
             <div class="status">Processing your order...</div>
+        </div>
+
+        <div class="chat-interface" id="chatInterface">
+            <input type="text" id="chatInput" placeholder="Or type your order here..." autocomplete="off">
+            <button id="sendBtn" aria-label="Send Text">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            </button>
         </div>
 
         <div class="result-box" id="resultBox">
@@ -292,6 +346,7 @@
             
             // Show loading state
             recordingState.style.display = 'none';
+            document.getElementById('chatInterface').style.display = 'none';
             loadingState.style.display = 'block';
             statusText.innerText = "Hold to Speak";
 
@@ -313,15 +368,64 @@
                 // Show results
                 loadingState.style.display = 'none';
                 recordingState.style.display = 'block';
+                document.getElementById('chatInterface').style.display = 'flex';
                 resultBox.classList.add('visible');
                 
             } catch (error) {
                 console.error(error);
                 loadingState.style.display = 'none';
                 recordingState.style.display = 'block';
+                document.getElementById('chatInterface').style.display = 'flex';
                 statusText.innerText = "Error processing request";
             }
         }
+
+        const chatInput = document.getElementById('chatInput');
+        const sendBtn = document.getElementById('sendBtn');
+        
+        async function sendTextToServer() {
+            const text = chatInput.value.trim();
+            if (!text) return;
+            
+            chatInput.value = '';
+            
+            // Show loading state
+            recordingState.style.display = 'none';
+            document.getElementById('chatInterface').style.display = 'none';
+            loadingState.style.display = 'block';
+            statusText.innerText = "Hold to Speak";
+
+            try {
+                const response = await fetch('/api/order/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId, text: text })
+                });
+                
+                const data = await response.json();
+                
+                transcriptionText.innerText = `"${data.transcription}"`;
+                responseText.innerText = data.message;
+                
+                // Show results
+                loadingState.style.display = 'none';
+                recordingState.style.display = 'block';
+                document.getElementById('chatInterface').style.display = 'flex';
+                resultBox.classList.add('visible');
+                
+            } catch (error) {
+                console.error(error);
+                loadingState.style.display = 'none';
+                recordingState.style.display = 'block';
+                document.getElementById('chatInterface').style.display = 'flex';
+                statusText.innerText = "Error processing request";
+            }
+        }
+        
+        sendBtn.addEventListener('click', sendTextToServer);
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendTextToServer();
+        });
     </script>
 </body>
 </html>
