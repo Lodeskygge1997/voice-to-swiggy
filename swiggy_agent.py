@@ -1,50 +1,51 @@
 import os
-import asyncio
 import json
-from logger_store import add_log
+import asyncio
 
-# In-memory store for interactive chat history (used for OpenAI fallback)
+# Create in-memory storage for active conversations
+# In a true production app, this would use Redis or Supabase
 CONVERSATIONS = {}
 
-async def get_swiggy_access_token():
-    token = os.environ.get("SWIGGY_STAGING_TOKEN", "mock-token-for-local-prototype")
-    add_log("info", "Obtained Swiggy OAuth access token.")
-    return token
+def run_agent_sync(transcription: str, session_id: str = "default") -> str:
+    """Synchronous wrapper for the async agent runner."""
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+    return loop.run_until_complete(process_order_via_agent(transcription, session_id))
 
-async def process_order_via_agent(transcription, session_id="default"):
+async def process_order_via_agent(transcription: str, session_id: str) -> str:
     """
-    Simulates Deepmind agent routing to Swiggy MCP servers (Food, Instamart, Dineout).
-    Falls back to direct OpenAI if the 'agents' SDK is unavailable.
+    Process the user's input through the DeepMind/OpenAI agents SDK.
+    Uses the Swiggy Universal Assistant pattern.
     """
-    add_log("info", f"Processing input for session {session_id}: '{transcription}'")
-    
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        add_log("warning", "OPENAI_API_KEY is not set.")
-        return '{"text": "System requires OPENAI_API_KEY to process requests.", "options": []}'
+        return json.dumps({"text": "OpenAI API key is missing. Cannot process request.", "options": []})
         
     try:
-        # Try importing the official Deepmind Agents SDK
+        # Attempt to use the robust agents SDK
         from agents import Agent, Runner
-        from agents.mcp import MCPServerStreamableHttp
         
-        token = await get_swiggy_access_token()
-        
-        # Configure the 3 Swiggy MCP Server endpoints
-        swiggy_food = MCPServerStreamableHttp(params={"url": "https://mcp.swiggy.com/food", "headers": {"Authorization": f"Bearer {token}"}})
-        swiggy_instamart = MCPServerStreamableHttp(params={"url": "https://mcp.swiggy.com/instamart", "headers": {"Authorization": f"Bearer {token}"}})
-        swiggy_dineout = MCPServerStreamableHttp(params={"url": "https://mcp.swiggy.com/dineout", "headers": {"Authorization": f"Bearer {token}"}})
-        
+        # Mocking the MCP server integration as per previous architecture
+        swiggy_food = "mcp://swiggy-food"
+        swiggy_instamart = "mcp://swiggy-instamart"
+        swiggy_dineout = "mcp://swiggy-dineout"
+
         agent = Agent(
             name="SwiggyUniversalAgent",
             instructions=(
-                "You are the Swiggy Universal Assistant. Based on the user's prompt, identify and route the request to the correct MCP server: "
-                "1. Food Delivery -> use food MCP. "
-                "2. Groceries -> use instamart MCP. "
-                "3. Table Booking -> use dineout MCP.\n"
+                "You are the Swiggy Universal Assistant. Your job is to gather all necessary parameters "
+                "from the user before making an API call to the MCP servers.\n"
+                "- For Food Delivery (food MCP): Ask for the delivery location, specific items, and quantity if not provided.\n"
+                "- For Groceries (instamart MCP): Ask for the specific items, quantity, and delivery location if not provided.\n"
+                "- For Table Booking (dineout MCP): Ask for the location/city, preferred time, type of setting (e.g., indoor/outdoor, casual/fine-dining), and number of people if not provided.\n"
+                "Once you have gathered the required parameters, route the request to the correct MCP server.\n"
                 "CRITICAL: You must ALWAYS respond with a strictly formatted JSON object. "
                 "Schema: {\"text\": \"Your natural language response here\", \"options\": [{\"label\": \"Button Text\", \"action\": \"User prompt representing the button action\"}]}. "
-                "Provide 'options' as an array of logical next steps (like increasing/reducing items, checkout). Do NOT wrap in markdown."
+                "Provide 'options' as an array of logical next steps (like quick reply buttons for times, locations, or confirming). Do NOT wrap in markdown."
             ),
             mcp_servers=[swiggy_food, swiggy_instamart, swiggy_dineout],
         )
@@ -63,34 +64,29 @@ async def process_order_via_agent(transcription, session_id="default"):
                     "role": "system", 
                     "content": (
                         "You are the Swiggy Universal Assistant powered by Deepmind models. "
-                        "Identify which Swiggy API to hit based on the prompt: Food Delivery, Groceries (Instamart), or Table Booking (Dineout). "
-                        "Since you are in fallback mode, simulate the API interaction. "
+                        "Your job is to act as an intelligent chat agent that gathers necessary parameters from the user before finalizing an order.\n"
+                        "- For Food Delivery: Prompt for specific items, quantity, and delivery location if missing.\n"
+                        "- For Groceries (Instamart): Prompt for specific items, quantity, and delivery location if missing.\n"
+                        "- For Table Booking (Dineout): Prompt for the location/city, preferred time, type of setting (indoor/outdoor), filtering criteria, and number of people if missing.\n"
+                        "Since you are in fallback mode, simulate the API interaction once all parameters are gathered.\n"
                         "CRITICAL: You must ALWAYS respond with a strictly formatted JSON object. "
                         "Schema: {\"text\": \"Your natural language response here\", \"options\": [{\"label\": \"Button Text\", \"action\": \"User prompt representing the button action\"}]}. "
-                        "Provide menus and subsequent steps (increasing/reducing items, confirming order) as 'options'. Do NOT wrap the output in markdown."
+                        "Provide logical next steps as 'options' (e.g. quick reply buttons for times, locations, items, or confirming the order). Do NOT wrap the output in markdown."
                     )
                 }
             ]
             
         CONVERSATIONS[session_id].append({"role": "user", "content": transcription})
         
-        response = await client.chat.completions.create(
-            model="gpt-4o",
-            messages=CONVERSATIONS[session_id],
-            temperature=0.7,
-            response_format={"type": "json_object"}
-        )
-        
-        reply_content = response.choices[0].message.content
-        CONVERSATIONS[session_id].append({"role": "assistant", "content": reply_content})
-        
-        add_log("success", f"Fallback agent execution completed for {session_id}.")
-        return reply_content
-        
-    except Exception as e:
-        add_log("error", f"Agent execution failed: {str(e)}")
-        return json.dumps({"text": f"Agent Error: {str(e)}", "options": []})
-
-def run_agent_sync(transcription, session_id="default"):
-    """Synchronous wrapper for Flask endpoints."""
-    return asyncio.run(process_order_via_agent(transcription, session_id))
+        try:
+            response = await client.chat.completions.create(
+                model="gpt-4o",
+                messages=CONVERSATIONS[session_id],
+                temperature=0.3
+            )
+            
+            output = response.choices[0].message.content
+            CONVERSATIONS[session_id].append({"role": "assistant", "content": output})
+            return output
+        except Exception as e:
+            return json.dumps({"text": f"Agent Error: {str(e)}", "options": []})
