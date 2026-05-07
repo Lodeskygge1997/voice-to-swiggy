@@ -10,6 +10,20 @@ from swiggy_agent import run_agent_sync
 from logger_store import add_log, server_logs
 from network_store import record_trace, get_traces, record_user_behavior
 
+def send_telegram_msg_global(chat_id, text, parse_mode="Markdown", reply_markup=None):
+    import requests
+    TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not TELEGRAM_BOT_TOKEN:
+        return
+    base_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    try:
+        requests.post(f"{base_url}/sendMessage", json=payload)
+    except Exception as e:
+        add_log("error", f"Failed to send telegram message: {e}")
+
 app = Flask(__name__, static_folder='static')
 
 @app.before_request
@@ -104,12 +118,29 @@ def order_from_web():
     text = process_audio(temp_path)
     
     # 2. Process with Swiggy MCP Agent
-    response_msg = run_agent_sync(text)
+    response_msg = run_agent_sync(text, session_id=user_id)
+    
+    # Send confirmation to Telegram
+    if user_id and user_id != "anonymous_web_user":
+        try:
+            import json
+            clean_json = response_msg.strip()
+            if clean_json.startswith("```json"): clean_json = clean_json[7:]
+            if clean_json.endswith("```"): clean_json = clean_json[:-3]
+            parsed = json.loads(clean_json.strip())
+            swiggy_text = parsed.get("text", response_msg)
+        except:
+            swiggy_text = response_msg
+            
+        send_telegram_msg_global(
+            chat_id=user_id,
+            text=f"✅ *Voice Order Processed*\nI heard: _{text}_\n\n🛍️ *Swiggy:* {swiggy_text}"
+        )
     
     return jsonify({
         "transcription": text,
-        "message": response_msg,
-        "cart": [] # Cart is now managed by the agent internally
+        "message": swiggy_text,
+        "cart": []
     })
 
 @app.route('/api/telegram/webhook', methods=['POST'])
@@ -129,14 +160,7 @@ def telegram_webhook():
     base_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
     
     def send_telegram_msg(chat_id, text, parse_mode="Markdown", reply_markup=None):
-        payload = {
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": parse_mode
-        }
-        if reply_markup:
-            payload["reply_markup"] = reply_markup
-        requests.post(f"{base_url}/sendMessage", json=payload)
+        send_telegram_msg_global(chat_id, text, parse_mode, reply_markup)
         
     def process_and_reply(chat_id, sender_name, user_input):
         send_telegram_msg(chat_id, "🤖 *Thinking...*")
@@ -180,6 +204,10 @@ def telegram_webhook():
         add_log("info", f"Telegram Button Clicked: {action}")
         record_user_behavior(chat_id, "telegram_button_click", {"action": action})
         
+        if action == "start_chat":
+            send_telegram_msg(chat_id, "Great! 💬 What are you craving today?\n\n_(You can order food, groceries via Instamart, or book a Dineout table!)_")
+            return "OK", 200
+            
         process_and_reply(chat_id, cb["from"].get("first_name", "User"), action)
         return "OK", 200
 
@@ -225,8 +253,13 @@ def telegram_webhook():
         if text == "/start":
             host = request.host_url.rstrip('/')
             web_app_url = f"{host}/?uid={chat_id}"
-            kb = {"inline_keyboard": [[{"text": "📞 Start Live Voice Call", "web_app": {"url": web_app_url}}]]}
-            send_telegram_msg(chat_id, f"Hello {sender_name}! 🍔 Welcome to Voice-to-Swiggy.\n\nSend me a *Voice Note* telling me what you want to order, or tap below to start a live call!", reply_markup=kb)
+            kb = {
+                "inline_keyboard": [
+                    [{"text": "📞 Live Call", "web_app": {"url": web_app_url}}],
+                    [{"text": "💬 Interactive Chat", "callback_data": "start_chat"}]
+                ]
+            }
+            send_telegram_msg(chat_id, f"Hello {sender_name}! 🍔 Welcome to Voice-to-Swiggy.\n\nChoose an option below to begin:", reply_markup=kb)
             return "OK", 200
             
         process_and_reply(chat_id, sender_name, text)
