@@ -43,38 +43,45 @@ def telegram_api_request(method, endpoint, **kwargs):
         # Don't save huge binary blobs in the DB
         resp_body = response.text[:1000] if "audio" not in content_type and "octet-stream" not in content_type else "Binary File"
             
-        record_trace(
-            direction="OUTBOUND",
-            method=method.upper(),
-            url=log_url,
-            request_headers=dict(response.request.headers),
-            request_body=str(req_body),
-            response_status=response.status_code,
-            response_headers=dict(response.headers),
-            response_body=resp_body,
-            duration_ms=duration
-        )
+        try:
+            record_trace(
+                direction="OUTBOUND",
+                method=method.upper(),
+                url=log_url,
+                request_headers=dict(response.request.headers),
+                request_body=str(req_body),
+                response_status=response.status_code,
+                response_headers=dict(response.headers),
+                response_body=resp_body,
+                duration_ms=duration
+            )
+        except Exception as trace_e:
+            add_log("error", f"Failed to record outbound trace: {trace_e}")
+            
         return response
     except Exception as e:
         duration = int((time.time() - start_time) * 1000)
         log_url = url.replace(TELEGRAM_BOT_TOKEN, "***") if TELEGRAM_BOT_TOKEN else url
         req_body = kwargs.get("json", kwargs.get("data", ""))
-        record_trace(
-            direction="OUTBOUND",
-            method=method.upper(),
-            url=log_url,
-            request_headers={},
-            request_body=str(req_body),
-            response_status=500,
-            response_headers={},
-            response_body=str(e),
-            duration_ms=duration
-        )
+        try:
+            record_trace(
+                direction="OUTBOUND",
+                method=method.upper(),
+                url=log_url,
+                request_headers={},
+                request_body=str(req_body),
+                response_status=500,
+                response_headers={},
+                response_body=str(e),
+                duration_ms=duration
+            )
+        except:
+            pass
         add_log("error", f"Telegram API error: {e}")
         return None
 
-def send_telegram_msg_global(chat_id, text, parse_mode="Markdown", reply_markup=None):
-    payload = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
+def send_telegram_msg_global(chat_id, text, reply_markup=None):
+    payload = {"chat_id": chat_id, "text": text}
     if reply_markup:
         payload["reply_markup"] = reply_markup
     telegram_api_request("POST", "sendMessage", json=payload)
@@ -101,17 +108,21 @@ def log_request(response):
     except Exception:
         resp_body = "Binary Data"
         
-    record_trace(
-        direction="INBOUND",
-        method=request.method,
-        url=request.url,
-        request_headers=dict(request.headers),
-        request_body=g.req_body,
-        response_status=response.status_code,
-        response_headers=dict(response.headers),
-        response_body=resp_body,
-        duration_ms=duration
-    )
+    try:
+        record_trace(
+            direction="INBOUND",
+            method=request.method,
+            url=request.url,
+            request_headers=dict(request.headers),
+            request_body=g.req_body,
+            response_status=response.status_code,
+            response_headers=dict(response.headers),
+            response_body=resp_body,
+            duration_ms=duration
+        )
+    except Exception as e:
+        add_log("error", f"Failed to record inbound trace: {e}")
+        
     return response
 
 @app.route('/admin/logs')
@@ -189,7 +200,7 @@ def order_from_web():
             
         send_telegram_msg_global(
             chat_id=user_id,
-            text=f"✅ *Voice Order Processed*\nI heard: _{text}_\n\n🛍️ *Swiggy:* {swiggy_text}"
+            text=f"✅ Voice Order Processed\nI heard: _{text}_\n\n🛍️ Swiggy: {swiggy_text}"
         )
     
     return jsonify({
@@ -214,11 +225,11 @@ def telegram_webhook():
     import json
     base_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
     
-    def send_telegram_msg(chat_id, text, parse_mode="Markdown", reply_markup=None):
-        send_telegram_msg_global(chat_id, text, parse_mode, reply_markup)
+    def send_telegram_msg(chat_id, text, reply_markup=None):
+        send_telegram_msg_global(chat_id, text, reply_markup)
         
     def process_and_reply(chat_id, sender_name, user_input):
-        send_telegram_msg(chat_id, "🤖 *Thinking...*")
+        send_telegram_msg(chat_id, "🤖 Thinking...")
         reply_text = run_agent_sync(user_input, session_id=str(chat_id))
         
         try:
@@ -245,7 +256,7 @@ def telegram_webhook():
         # User will only see Swiggy's options
         
         reply_markup = {"inline_keyboard": inline_keyboard} if inline_keyboard else None
-        send_telegram_msg(chat_id, f"🛍️ *Swiggy:* {out_text}", reply_markup=reply_markup)
+        send_telegram_msg(chat_id, f"🛍️ Swiggy: {out_text}", reply_markup=reply_markup)
 
     # 1. Handle Callback Queries (Button Clicks)
     if "callback_query" in data:
@@ -260,7 +271,7 @@ def telegram_webhook():
         record_user_behavior(chat_id, "telegram_button_click", {"action": action})
         
         if action == "start_chat":
-            send_telegram_msg(chat_id, "Great! 💬 What are you craving today?\n\n_(You can order food, groceries via Instamart, or book a Dineout table!)_")
+            send_telegram_msg(chat_id, "Great! 💬 What are you craving today?\n\n(You can order food, groceries via Instamart, or book a Dineout table!)")
             return "OK", 200
             
         process_and_reply(chat_id, cb["from"].get("first_name", "User"), action)
@@ -302,9 +313,9 @@ def telegram_webhook():
         with open(temp_path, "wb") as f:
             f.write(audio_data)
             
-        send_telegram_msg(chat_id, "🎧 *Listening to your order...*", parse_mode="Markdown")
+        send_telegram_msg(chat_id, "🎧 Listening to your order...")
         text = process_audio(temp_path)
-        send_telegram_msg(chat_id, f"🎙️ *I heard:* '{text}'")
+        send_telegram_msg(chat_id, f"🎙️ I heard: '{text}'")
         
         process_and_reply(chat_id, sender_name, text)
         
